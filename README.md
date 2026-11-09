@@ -41,6 +41,7 @@
 - [软件需求规格说明书 v0.2（待团队评审）](docs/requirements/软件需求规格说明书.md)
 - [项目设计与开发规范 v1.1（修订评审稿）](docs/standards/知芽_项目设计与开发规范_精简版_v1.1.md)
 - [公共术语与枚举](docs/standards/glossary.md)
+- [设计变更与冲突决策记录](docs/standards/design-change-log.md)
 - [系统与数据库设计 v1.1](docs/design/team-lead-handoff-v1.1.md)
 - [接口契约 v0.4](docs/design/api-contract.md)
 - [种子数据与导入说明](data/seed/README.md)
