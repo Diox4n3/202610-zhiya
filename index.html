@@ -1,0 +1,3018 @@
+<!doctype html>
+<html lang="zh-CN" data-type="software">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7efe3">
+  <meta name="page-type" content="software">
+  <meta name="site-kind" content="software">
+  <meta name="description" content="知芽 AI 亲子绘本共读网页原型">
+  <title>知芽绘本 · AI 亲子共读</title>
+  <link rel="stylesheet" href="./assets/vendor/openpageflip/styles.css">
+  <style>
+    :root {
+      --ink: #24372d;
+      --ink-soft: #4e5c53;
+      --muted: #6b716c;
+      --leaf: #466b51;
+      --leaf-deep: #365846;
+      --leaf-pale: #e8efe5;
+      --leaf-wash: #f1f5ef;
+      --cream: #fff9ee;
+      --paper: #fffdf8;
+      --paper-soft: #fbf5ea;
+      --sand: #fae9d0;
+      --line: #e4d8c7;
+      --brown: #714a2c;
+      --brown-soft: #a57345;
+      --gold: #f1cb82;
+      --danger: #a14f3f;
+      --danger-soft: #f9ebe6;
+      --shadow-sm: 0 8px 22px rgba(73, 47, 25, .08);
+      --shadow-md: 0 18px 48px rgba(73, 47, 25, .13);
+      --radius-sm: 10px;
+      --radius-md: 18px;
+      --radius-lg: 24px;
+      --header-h: 68px;
+      --page-max: 1392px;
+      --font-ui: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --font-story: "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: #efe2d2; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--ink);
+      background: #f4eadc;
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    body[data-view="home"],
+    body[data-view="library"],
+    body[data-view="detail"] {
+      background-image:
+        linear-gradient(rgba(255, 249, 239, .35), rgba(255, 249, 239, .22)),
+        url("./assets/figma-prototype/home-background.png");
+      background-size: cover;
+      background-position: center top;
+      background-attachment: fixed;
+    }
+    body[data-view="library"] {
+      background-image:
+        linear-gradient(rgba(255, 250, 242, .42), rgba(255, 250, 242, .26)),
+        url("./assets/figma-prototype/library-background.png");
+    }
+    body[data-view="reader"],
+    body[data-view="account"] {
+      background-color: #f6efe4;
+      background-image:
+        radial-gradient(circle at 82% 5%, rgba(241, 203, 130, .18), transparent 28rem),
+        linear-gradient(rgba(255, 251, 244, .74), rgba(247, 239, 227, .9));
+    }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button, input, textarea, select, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+      outline: 3px solid rgba(241, 203, 130, .85);
+      outline-offset: 2px;
+    }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    img, svg { display: block; }
+    img { max-width: 100%; }
+    h1, h2, h3, p, blockquote { margin-top: 0; overflow-wrap: anywhere; }
+    a { color: inherit; }
+    mark { color: var(--ink); background: #f8e3a8; border-radius: 4px; padding: 0 .1em; }
+
+    .app {
+      width: min(100%, 1600px);
+      min-height: 100vh;
+      margin: 0 auto;
+      position: relative;
+      background: rgba(255, 252, 246, .32);
+    }
+    .page-width {
+      width: min(calc(100% - 48px), var(--page-max));
+      margin: 0 auto;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 60;
+      height: var(--header-h);
+      border-bottom: 1px solid rgba(228, 216, 199, .7);
+      background: rgba(255, 253, 248, .9);
+      backdrop-filter: blur(16px) saturate(.92);
+      -webkit-backdrop-filter: blur(16px) saturate(.92);
+    }
+    .header-inner {
+      height: 100%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .brand-button {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 220px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+    }
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      color: #f5d38e;
+      background: var(--ink);
+      font-family: var(--font-story);
+      font-size: 24px;
+      line-height: 1;
+      box-shadow: 0 8px 20px rgba(36, 55, 45, .12);
+    }
+    .brand-mark::before { content: "芽"; }
+    .brand-copy strong {
+      display: block;
+      font-family: var(--font-story);
+      font-size: 22px;
+      line-height: 27px;
+      font-weight: 600;
+      letter-spacing: .06em;
+    }
+    .brand-copy small {
+      display: block;
+      margin-top: 1px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 14px;
+    }
+    .top-nav {
+      min-width: 0;
+      height: 50px;
+      position: absolute;
+      left: 50%;
+      top: 9px;
+      transform: translateX(-50%);
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      border: 1px solid rgba(225, 229, 221, .9);
+      border-radius: 26px;
+      background: rgba(255, 255, 255, .72);
+      box-shadow: 0 3px 14px rgba(45, 54, 45, .035);
+    }
+    .nav-button {
+      height: 40px;
+      padding: 0 21px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 20px;
+      color: var(--ink-soft);
+      background: transparent;
+      font-size: 14px;
+      white-space: nowrap;
+      transition: color .18s ease, background-color .18s ease, transform .18s ease;
+    }
+    .nav-button:hover { color: var(--ink); background: var(--leaf-wash); transform: translateY(-1px); }
+    .nav-button:active { transform: translateY(1px); }
+    .nav-button.active { color: #fff; background: var(--leaf); }
+    .nav-icon { width: 17px; height: 17px; object-fit: contain; }
+    .nav-button:not(.active) .nav-icon { filter: brightness(0) saturate(100%); opacity: .78; }
+    .nav-button.active .nav-icon { filter: brightness(0) invert(1); }
+    .header-spacer { flex: 1; }
+    .header-search {
+      width: 260px;
+      height: 40px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid #e1e5dd;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, .82);
+    }
+    .header-search::before {
+      content: "⌕";
+      color: var(--brown);
+      font-size: 22px;
+      line-height: 1;
+      transform: translateY(-1px);
+    }
+    .header-search input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      color: var(--ink);
+      background: transparent;
+      font-size: 12px;
+    }
+    .header-search input::placeholder { color: #8d8579; }
+    .avatar-button {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      color: var(--brown);
+      background: #f0d5b8;
+      font-family: var(--font-story);
+      font-size: 18px;
+      box-shadow: 0 6px 16px rgba(113, 74, 44, .12);
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .avatar-button:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(113, 74, 44, .18); }
+    .avatar-button:active { transform: translateY(1px); }
+
+    .page {
+      min-height: calc(100vh - var(--header-h));
+      padding-top: 22px;
+      padding-bottom: 44px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0 0 12px;
+      color: var(--leaf);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+    .eyebrow::before { content: "✦"; color: var(--brown-soft); }
+    .page-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+    .page-heading h1, .page-heading h2 {
+      margin: 0;
+      font-family: var(--font-story);
+      font-size: clamp(30px, 3vw, 42px);
+      font-weight: 600;
+      line-height: 1.18;
+      letter-spacing: .02em;
+    }
+    .page-heading p {
+      max-width: 560px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 22px;
+    }
+    .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .section-heading h2 {
+      margin: 0;
+      font-family: var(--font-story);
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 32px;
+    }
+    .section-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 18px; }
+
+    .primary, .secondary, .text-button {
+      min-height: 44px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease;
+    }
+    .primary {
+      padding: 0 20px;
+      border: 1px solid var(--leaf);
+      color: #fff;
+      background: var(--leaf);
+      box-shadow: 0 7px 18px rgba(70, 107, 81, .16);
+    }
+    .primary:hover { background: var(--leaf-deep); transform: translateY(-1px); box-shadow: 0 10px 22px rgba(70, 107, 81, .22); }
+    .primary:active { transform: translateY(1px); }
+    .secondary {
+      padding: 0 20px;
+      border: 1px solid #d7dccf;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    .secondary:hover { background: var(--leaf-wash); transform: translateY(-1px); }
+    .secondary:active { transform: translateY(1px); }
+    .text-button {
+      min-height: 36px;
+      padding: 0 4px;
+      border: 0;
+      color: var(--brown-soft);
+      background: transparent;
+    }
+    .text-button:hover { color: var(--brown); text-decoration: underline; text-underline-offset: 4px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      color: var(--leaf);
+      background: var(--leaf-pale);
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .pill.warm { color: var(--brown); background: #f8ecd6; }
+    .address { color: var(--muted); font-size: 11px; }
+
+    .card {
+      border: 1px solid rgba(230, 219, 204, .9);
+      border-radius: var(--radius-md);
+      background: rgba(255, 253, 248, .94);
+      box-shadow: var(--shadow-sm);
+    }
+    .book-cover-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .home-page {
+      height: calc(100svh - var(--header-h));
+      min-height: 760px;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .home-hero {
+      flex: 0 0 48vh;
+      min-height: 400px;
+      display: grid;
+      grid-template-columns: minmax(320px, .92fr) minmax(390px, 1.16fr) minmax(340px, .92fr);
+      align-items: center;
+      gap: 24px;
+      padding: 0;
+    }
+    .home-copy { padding-left: clamp(12px, 3.2vw, 56px); align-self: center; }
+    .home-copy h1 {
+      margin: 0;
+      max-width: 440px;
+      font-family: var(--font-story);
+      font-size: clamp(38px, 3.05vw, 43px);
+      font-weight: 500;
+      line-height: 1.24;
+      letter-spacing: .02em;
+    }
+    .home-copy h1 span { display: block; }
+    .home-copy p {
+      max-width: 340px;
+      margin: 16px 0 0;
+      color: #625f57;
+      font-family: var(--font-story);
+      font-size: 14px;
+      line-height: 24px;
+    }
+    .home-copy .primary { margin-top: 22px; border-radius: 999px; padding-inline: 26px; }
+    .hero-book-stage {
+      min-height: 420px;
+      position: relative;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }
+    .hero-book-stage::before {
+      content: "";
+      position: absolute;
+      width: min(88%, 520px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 248, 234, .36);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .48);
+      z-index: -2;
+    }
+    .hero-book-base {
+      width: min(96%, 650px);
+      height: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 24px 26px rgba(80, 48, 22, .16));
+      pointer-events: none;
+      transform: translateY(22px);
+    }
+    .hero-book-cover {
+      width: clamp(210px, 23vw, 300px);
+      aspect-ratio: 256 / 298;
+      position: absolute;
+      top: calc(50% + 22px);
+      left: 50%;
+      overflow: hidden;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      filter: drop-shadow(0 22px 20px rgba(75, 45, 21, .28));
+      -webkit-mask-image: radial-gradient(ellipse 72% 76% at 50% 50%, #000 48%, rgba(0, 0, 0, .96) 64%, rgba(0, 0, 0, .74) 78%, transparent 100%);
+      mask-image: radial-gradient(ellipse 72% 76% at 50% 50%, #000 48%, rgba(0, 0, 0, .96) 64%, rgba(0, 0, 0, .74) 78%, transparent 100%);
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      transform: translate(-50%, -50%) rotate(-4deg);
+    }
+    .hero-book-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .home-info-card {
+      align-self: center;
+      padding: 22px;
+      border-radius: 20px;
+      background: rgba(255, 249, 238, .95);
+      box-shadow: var(--shadow-md);
+    }
+    .home-info-card h2 {
+      margin: 13px 0 5px;
+      font-family: var(--font-story);
+      font-size: 32px;
+      line-height: 1.25;
+      font-weight: 600;
+    }
+    .home-info-card .author { margin: 0; color: #776f64; font-size: 12px; line-height: 19px; }
+    .book-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    .book-meta span {
+      padding: 4px 9px;
+      border-radius: 999px;
+      color: #6c6257;
+      background: #f4ecdf;
+      font-size: 10px;
+      line-height: 16px;
+    }
+    .home-info-card .summary {
+      margin: 13px 0 0;
+      color: #625c52;
+      font-family: var(--font-story);
+      font-size: 14px;
+      line-height: 23px;
+    }
+    .card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 16px; }
+    .card-actions .primary, .card-actions .secondary { min-height: 42px; padding: 0 10px; }
+
+    .home-bottom {
+      flex: 0 0 39vh;
+      min-height: 320px;
+      margin-top: auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 278px;
+      gap: 40px;
+      align-items: stretch;
+      padding-bottom: 0;
+    }
+    .featured-shelf {
+      min-height: 0;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1074 / 351;
+      position: relative;
+      padding: 0;
+      overflow: hidden;
+      border-radius: 24px;
+      background: transparent;
+      align-self: end;
+      container-type: inline-size;
+    }
+    .shelf-canvas {
+      position: absolute;
+      inset: 0;
+    }
+    .shelf-canvas.swap-next { animation: shelf-slide-next .32s cubic-bezier(.22, .7, .22, 1); }
+    .shelf-canvas.swap-prev { animation: shelf-slide-prev .32s cubic-bezier(.22, .7, .22, 1); }
+    @keyframes shelf-slide-next {
+      from { opacity: .58; transform: translateX(24px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes shelf-slide-prev {
+      from { opacity: .58; transform: translateX(-24px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .shelf-surface-art {
+      width: 96.37%;
+      height: 85.47%;
+      position: absolute;
+      left: 1.86%;
+      bottom: 0;
+      object-fit: fill;
+      pointer-events: none;
+    }
+    .shelf-title-row {
+      position: absolute;
+      z-index: 3;
+      left: 5.59%;
+      right: 6.52%;
+      top: 17%;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .shelf-heading-line { display: flex; align-items: center; gap: .84cqw; }
+    .shelf-heading-line img { width: 2.51cqw; min-width: 13px; aspect-ratio: 1; object-fit: contain; }
+    .shelf-title-row h2 { margin: 0; color: var(--brown); font-family: var(--font-story); font-size: 20px; font-size: max(10px, 1.86cqw); line-height: 34px; line-height: 3.17cqw; letter-spacing: .05em; white-space: nowrap; }
+    .shelf-title-row .text-button { min-height: 0; padding: 0; position: relative; top: 1cqw; color: var(--brown); font-family: var(--font-story); font-size: 16px; font-size: max(10px, 1.49cqw); line-height: 28px; line-height: 2.61cqw; white-space: nowrap; }
+    .shelf-showcase { position: absolute; inset: 0; z-index: 2; }
+    .shelf-showcase-book,
+    .shelf-placeholder {
+      position: absolute;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .shelf-showcase-book {
+      width: 14.8%;
+      height: auto;
+      aspect-ratio: 158 / 180;
+      top: auto;
+      bottom: 12.54%;
+      overflow: hidden;
+      border: .37cqw solid #dfb783;
+      border-radius: .75cqw;
+      background: #e8efe2;
+      box-shadow: 0 8px 16px rgba(88, 58, 32, .14);
+      transform-origin: center bottom;
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .shelf-showcase-book:hover,
+    .shelf-showcase-book:focus-visible {
+      z-index: 7;
+      box-shadow: 0 15px 28px rgba(88, 58, 32, .22);
+      transform: scale(1.1);
+    }
+    .shelf-showcase-book.previous { left: 6.10%; }
+    .shelf-showcase-book.one { left: 41.50%; }
+    .shelf-showcase-book.two { left: 60.60%; }
+    .shelf-showcase-book.three { left: 78.90%; }
+    .shelf-showcase-book.featured {
+      left: 22.40%;
+      z-index: 2;
+    }
+    .shelf-showcase-book img { width: 100%; height: 100%; object-fit: cover; }
+    .shelf-placeholder {
+      width: 14.8%;
+      height: auto;
+      aspect-ratio: 158 / 180;
+      top: auto;
+      bottom: 12.54%;
+      display: grid;
+      place-items: center;
+      border: 1px dashed #cdbba6;
+      border-radius: .84cqw;
+      color: #81776a;
+      background: rgba(255, 253, 248, .62);
+      font-size: 10px;
+      font-size: .93cqw;
+      line-height: 17px;
+      line-height: 1.58cqw;
+      text-align: center;
+    }
+    .shelf-placeholder.one { left: 41.50%; }
+    .shelf-placeholder.two { left: 60.60%; }
+    .shelf-placeholder.three { left: 78.90%; }
+    .shelf-arrow-hit {
+      width: 5.40%;
+      aspect-ratio: 1;
+      position: absolute;
+      top: 54%;
+      z-index: 8;
+      display: grid;
+      place-items: center;
+      border: 1px solid #d5a164;
+      border-radius: 50%;
+      color: var(--brown);
+      background: #fffffe;
+      box-shadow: 0 4px 4px rgba(0, 0, 0, .25);
+      font-size: max(16px, 2.2cqw);
+      line-height: 1;
+      transform: translateX(-50%);
+      transition: background-color .16s ease, transform .16s ease;
+    }
+    .shelf-arrow-hit:hover { background: #fff; transform: translateX(-50%) translateY(-1px); }
+    .shelf-arrow-hit.previous { left: 2.61%; }
+    .shelf-arrow-hit.next { left: 97.39%; }
+    .home-plan {
+      height: 100%;
+      min-height: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      border-radius: 24px;
+      background: var(--cream);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-16px);
+    }
+    .home-plan-kicker { color: var(--brown-soft); font-size: 11px; font-weight: 700; }
+    .home-plan-time {
+      margin-top: 19px;
+      display: flex;
+      align-items: flex-end;
+      gap: 7px;
+      color: var(--brown);
+      font-size: 16px;
+      line-height: 22px;
+      white-space: nowrap;
+    }
+    .home-plan-time strong {
+      font-family: var(--font-story);
+      font-size: 64px;
+      line-height: 52px;
+      font-weight: 500;
+    }
+    .home-plan h2 {
+      min-height: 64px;
+      margin: 8px 0 0;
+      font-family: var(--font-story);
+      font-size: 24px;
+      line-height: 33px;
+      font-weight: 600;
+    }
+    .home-plan blockquote { margin: auto 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: #6a6055; font-family: var(--font-story); font-size: 13px; line-height: 21px; }
+    .home-plan .primary { width: 100%; margin-top: 11px; }
+    .home-plan-note { margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 15px; text-align: center; }
+
+    .library-page { padding-top: 78px; }
+    .library-content {
+      width: min(100%, 1262px);
+      margin: 0 auto;
+    }
+    .library-top-row {
+      display: grid;
+      grid-template-columns: 386px minmax(0, 1fr);
+      gap: 23px;
+      align-items: start;
+    }
+    .library-filter-panel {
+      height: 164px;
+      padding: 22px 24px;
+      border: 1px solid rgba(243, 225, 201, .72);
+      border-radius: 22px;
+      background: var(--cream);
+      box-shadow: var(--shadow-sm);
+      transition: height .22s ease;
+    }
+    .library-filter-panel.expanded { height: auto; min-height: 248px; }
+    .library-filter-panel h2 {
+      margin: 0;
+      font-family: var(--font-story);
+      font-size: 29px;
+      font-weight: 500;
+      line-height: 37px;
+      letter-spacing: .04em;
+    }
+    .library-filter-panel > p {
+      margin: 0;
+      color: #776f64;
+      font-size: 12px;
+      line-height: 18px;
+    }
+    .library-category-rows { display: grid; gap: 6px; margin-top: 4px; }
+    .library-category-row { display: grid; gap: 7px; }
+    .library-category-row:first-child { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .library-category-row:last-child { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .library-category-chip {
+      width: 100%;
+      min-height: 27px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--brown);
+      background: #e5caab;
+      font-family: var(--font-story);
+      font-size: 13px;
+      line-height: 27px;
+      text-align: center;
+      transition: transform .16s ease, background-color .16s ease;
+    }
+    .library-category-chip:hover { background: #ddbe9b; transform: translateY(-1px); }
+    .library-category-chip.active { background: #f1cb82; }
+    .library-filter-expand {
+      margin-top: 13px;
+      padding-top: 11px;
+      border-top: 1px solid #ead8bd;
+    }
+    .library-filter-expand strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--brown);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .library-option-list { display: flex; flex-wrap: wrap; gap: 7px; }
+    .library-option-chip {
+      min-height: 28px;
+      padding: 0 12px;
+      border: 1px solid #dfc9ad;
+      border-radius: 999px;
+      color: var(--brown);
+      background: #fffaf1;
+      font-size: 11px;
+    }
+    .library-option-chip:hover { background: #fff2dc; }
+    .library-option-chip.active { color: #fff; border-color: var(--leaf); background: var(--leaf); }
+    .filter-chip {
+      min-height: 34px;
+      padding: 0 13px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      color: var(--brown);
+      background: #f2dfc7;
+      font-size: 11px;
+      transition: background-color .16s ease, transform .16s ease;
+    }
+    .filter-chip:hover { background: #ead3b8; transform: translateY(-1px); }
+    .filter-chip.active { color: #fff; background: var(--leaf); }
+    .library-stage {
+      min-width: 0;
+      height: clamp(470px, 39vw, 500px);
+      position: relative;
+      margin-top: 0;
+    }
+    .book-wheel-panel {
+      width: min(100%, 1080px);
+      height: 100%;
+      position: relative;
+      margin: 0 auto;
+      overflow: hidden;
+      background: transparent;
+      isolation: isolate;
+      perspective: 1200px;
+    }
+    .book-wheel-panel::before {
+      content: "";
+      width: min(72%, 620px);
+      height: min(56%, 270px);
+      position: absolute;
+      left: 50%;
+      top: calc(50% + 8px);
+      z-index: 0;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(255, 247, 231, .54), rgba(255, 250, 241, .18) 48%, transparent 74%);
+      filter: blur(12px);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .book-wheel {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      transform-style: preserve-3d;
+    }
+    .wheel-book {
+      --wheel-x: 0px;
+      --wheel-y: 0px;
+      --wheel-z: 0px;
+      --wheel-scale: 1;
+      --wheel-rotate-y: 0deg;
+      --wheel-opacity: 1;
+      --wheel-layer: 1;
+      width: clamp(170px, 20vw, 290px);
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      opacity: var(--wheel-opacity);
+      filter: var(--wheel-filter, saturate(.82) brightness(.98));
+      transform: translate(-50%, -50%) translate3d(var(--wheel-x), var(--wheel-y), var(--wheel-z)) rotateY(var(--wheel-rotate-y)) scale(var(--wheel-scale));
+      transform-style: preserve-3d;
+      transform-origin: center;
+      backface-visibility: hidden;
+      z-index: var(--wheel-layer);
+      transition: transform .68s cubic-bezier(.22, .72, .2, 1), opacity .42s ease, filter .42s ease;
+      will-change: transform, opacity;
+    }
+    .wheel-book:hover,
+    .wheel-book:focus-visible {
+      z-index: 100;
+      opacity: 1;
+      filter: drop-shadow(0 18px 20px rgba(60, 36, 18, .2));
+      transform: translate(-50%, -50%) translate3d(var(--wheel-x), var(--wheel-y), var(--wheel-z)) rotateY(var(--wheel-rotate-y)) scale(calc(var(--wheel-scale) * 1.05));
+    }
+    .wheel-book.selected { filter: drop-shadow(0 16px 22px rgba(60, 36, 18, .2)); }
+    .wheel-book-shell {
+      width: 100%;
+      aspect-ratio: 457 / 418;
+      position: relative;
+      display: block;
+      filter: drop-shadow(0 7px 10px rgba(63, 42, 25, .13));
+    }
+    .wheel-book-shell > .book-shell { width: 100%; height: 100%; object-fit: contain; }
+    .wheel-cover {
+      position: absolute;
+      left: 18.15%;
+      top: 7.42%;
+      width: 64.75%;
+      height: 76.8%;
+      overflow: hidden;
+      border-radius: 2px 4px 4px 2px;
+      background: #e8eee0;
+      box-shadow: 0 1px 4px rgba(55, 34, 20, .12);
+    }
+    .wheel-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .carousel-dots {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: rgba(255, 250, 241, .78);
+      box-shadow: 0 4px 14px rgba(75, 48, 25, .08);
+      transform: translateX(-50%);
+    }
+    .carousel-dot {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+    }
+    .carousel-dot::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #cdb99f;
+      transition: width .22s ease, background-color .22s ease, transform .22s ease;
+    }
+    .carousel-dot:hover::before { background: var(--brown-soft); transform: scale(1.15); }
+    .carousel-dot.active::before { width: 18px; border-radius: 999px; background: var(--leaf); }
+    .wheel-controls {
+      position: absolute;
+      inset: 50% 12px auto;
+      z-index: 7;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+    .wheel-controls button { pointer-events: auto; }
+    .round-button {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #e0d3c2;
+      border-radius: 50%;
+      color: var(--brown);
+      background: rgba(255, 253, 248, .95);
+      font-size: 23px;
+      transition: transform .16s ease, background-color .16s ease;
+    }
+    .round-button:hover { background: #fff; transform: translateY(-1px); }
+    .library-feature-card {
+      height: 255px;
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 26px;
+      padding: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .72);
+      border-radius: 22px;
+      background: rgba(255, 249, 239, .93);
+      box-shadow: var(--shadow-sm);
+    }
+    .library-feature-cover {
+      width: 150px;
+      height: 152px;
+      align-self: start;
+      overflow: hidden;
+      border: 2px solid #d8b484;
+      border-radius: 8px 14px 14px 8px;
+      background: #e6ece1;
+      box-shadow: 6px 8px 0 #d9c2a8, 0 12px 22px rgba(70, 42, 19, .14);
+    }
+    .library-feature-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .library-feature-copy { min-width: 0; }
+    .library-feature-copy h2 { margin: 9px 0 5px; font-family: var(--font-story); font-size: 29px; line-height: 37px; }
+    .library-feature-copy > p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 18px; }
+    .reason-box {
+      margin-top: 10px;
+      padding: 8px 11px;
+      border-radius: 10px;
+      color: #5f594f;
+      background: #f5eee3;
+      font-size: 10px;
+      line-height: 17px;
+    }
+    .feature-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 12px; }
+    .feature-actions .primary,
+    .feature-actions .secondary { min-height: 38px; padding-inline: 18px; border-radius: 22px; }
+    .empty-state {
+      min-height: 300px;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      border: 1px dashed #cdbba6;
+      border-radius: 20px;
+      background: rgba(255, 253, 248, .76);
+      text-align: center;
+    }
+    .empty-state h2 { margin: 0; font-family: var(--font-story); font-size: 26px; }
+    .empty-state p { max-width: 420px; margin: 10px auto 18px; color: var(--muted); font-size: 12px; line-height: 21px; }
+
+    .detail-page {
+      min-height: calc(100vh - var(--header-h));
+      padding: 34px 0 52px;
+    }
+    .detail-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+    .detail-breadcrumb { color: var(--muted); font-size: 11px; }
+    .detail-card {
+      display: grid;
+      grid-template-columns: minmax(300px, .88fr) minmax(0, 1.3fr);
+      gap: 38px;
+      align-items: center;
+      min-height: 580px;
+      padding: clamp(26px, 4vw, 58px);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .72);
+      border-radius: 28px;
+      background: rgba(255, 249, 239, .91);
+      box-shadow: var(--shadow-md);
+      backdrop-filter: blur(8px);
+    }
+    .detail-cover-wrap { position: relative; min-height: 410px; display: grid; place-items: center; }
+    .detail-cover-wrap::before { content: ""; position: absolute; width: min(92%, 480px); aspect-ratio: 1; border-radius: 50%; background: rgba(250, 228, 194, .64); }
+    .detail-cover {
+      width: min(82%, 320px);
+      aspect-ratio: 256 / 298;
+      position: relative;
+      overflow: hidden;
+      border: 2px solid rgba(92, 62, 35, .28);
+      border-radius: 8px 14px 14px 8px;
+      box-shadow: 12px 14px 0 #d8c0a2, 0 26px 36px rgba(58, 39, 20, .2);
+      transform: rotate(-3deg);
+    }
+    .detail-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .detail-copy h1 { margin: 14px 0 8px; font-family: var(--font-story); font-size: clamp(38px, 4vw, 56px); line-height: 1.18; font-weight: 600; }
+    .detail-author { margin: 0; color: #776f64; font-size: 13px; }
+    .detail-summary { margin: 22px 0 0; color: #5f5b52; font-family: var(--font-story); font-size: 17px; line-height: 29px; }
+    .detail-quote {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border-left: 3px solid var(--gold);
+      color: var(--brown);
+      background: #fbf1de;
+      font-family: var(--font-story);
+      font-size: 16px;
+      line-height: 27px;
+    }
+    .detail-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+
+    .reader-page { min-height: calc(100vh - var(--header-h)); padding: 22px 0 36px; }
+    .reader-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+    .reader-heading h1 { margin: 0; font-family: var(--font-story); font-size: 29px; line-height: 38px; }
+    .reader-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .reader-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 20px;
+      align-items: start;
+    }
+    .reader-main { min-width: 0; }
+    .book-spread {
+      min-height: 556px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+      border: 1px solid #d6c6b2;
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow-md);
+    }
+    .flipbook-stage {
+      padding: 18px 14px 34px;
+      border: 1px solid rgba(220, 204, 184, .78);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(255, 252, 246, .94), rgba(248, 238, 224, .92));
+      box-shadow: var(--shadow-md);
+    }
+    .flipbook-book {
+      width: 100%;
+      margin: 0 auto;
+      filter: drop-shadow(0 18px 22px rgba(71, 45, 25, .15));
+    }
+    .flip-hint {
+      margin: 15px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 19px;
+      text-align: center;
+    }
+    .flip-page {
+      overflow: hidden;
+      background: #fffaf0;
+      color: var(--ink);
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .flip-page--illustration { position: relative; background: #e6ebdf; }
+    .flip-page--illustration > img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+    .flip-page--illustration::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(43, 29, 18, .06), transparent 9%, transparent 91%, rgba(43, 29, 18, .08));
+      pointer-events: none;
+    }
+    .flip-page-inner {
+      min-height: 100%;
+      height: 100%;
+      box-sizing: border-box;
+    }
+    .flip-page-inner--text {
+      position: relative;
+      padding: clamp(28px, 4vw, 48px) clamp(26px, 4vw, 44px) 28px;
+      display: flex;
+      flex-direction: column;
+      background:
+        linear-gradient(90deg, rgba(91, 63, 37, .08), transparent 8%),
+        linear-gradient(180deg, #fffdf7, #fff9ed);
+    }
+    .flip-page-inner--text::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 0, rgba(255, 255, 255, .82), transparent 58%);
+      pointer-events: none;
+    }
+    .flip-page-inner--text > * { position: relative; z-index: 1; }
+    .flip-page-inner--text .page-quote { margin-top: 18px; font-size: clamp(22px, 2.25vw, 29px); line-height: 1.55; }
+    .flip-page-inner--text .page-text { margin-top: 24px; font-size: clamp(15px, 1.35vw, 18px); line-height: 1.8; }
+    .flip-page-empty {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--paper);
+    }
+    .flip-page-empty .empty-state { min-height: 0; padding: 0; box-shadow: none; }
+    .book-page { min-width: 0; min-height: 556px; position: relative; }
+    .book-page.illustration { overflow: hidden; background: #e8eee0; }
+    .book-page.illustration > img { width: 100%; height: 100%; object-fit: cover; }
+    .book-page.illustration::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255, 249, 237, .06), rgba(67, 43, 22, .12));
+      pointer-events: none;
+    }
+    .book-page.text-page { padding: 44px 42px 34px; display: flex; flex-direction: column; }
+    .book-page.text-page::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 34px;
+      height: 100%;
+      background: linear-gradient(90deg, rgba(55, 34, 18, .09), transparent);
+      pointer-events: none;
+    }
+    .page-quote { margin: 12px 0 0; color: #4e524c; font-family: var(--font-story); font-size: 27px; line-height: 43px; }
+    .page-text { margin: 28px 0 0; color: #62655e; font-family: var(--font-story); font-size: 17px; line-height: 30px; }
+    .page-number {
+      margin-top: auto;
+      padding-top: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .page-dots { display: flex; gap: 5px; }
+    .page-dots i { width: 6px; height: 6px; border-radius: 50%; background: #dedbd2; }
+    .page-dots i.active { background: var(--leaf); }
+    .reader-side { display: grid; gap: 12px; }
+    .side-card { padding: 18px; border-radius: 17px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .side-card.audio { padding: 14px 16px; background: var(--leaf-pale); box-shadow: none; }
+    .audio-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--leaf); font-size: 11px; }
+    .audio-line button { min-height: 32px; padding: 0 12px; border: 1px solid #d7dccf; border-radius: 999px; background: var(--paper); font-size: 10px; }
+    .side-card h2 { margin: 0 0 11px; color: var(--brown); font-size: 12px; line-height: 19px; }
+    .side-card.question-card { border: 1px solid #e6cfae; background: var(--cream); }
+    .question-card p { margin: 0; font-family: var(--font-story); font-size: 18px; line-height: 29px; }
+    .question-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .question-actions .primary { width: 100%; }
+    .side-card.parent-tip p { margin: 0; color: #62655e; font-family: var(--font-story); font-size: 13px; line-height: 22px; }
+    .reader-dock {
+      width: min(100%, 760px);
+      margin: 18px auto 0;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      border: 1px solid #dfe3da;
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow-md);
+    }
+    .dock-button {
+      min-height: 52px;
+      padding: 6px 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      color: var(--ink);
+      background: transparent;
+      font-size: 11px;
+    }
+    .dock-button:hover { background: var(--leaf-wash); }
+    .dock-button.primary { color: #fff; background: var(--leaf); }
+    .dock-button.primary:hover { background: var(--leaf-deep); }
+    .dock-glyph { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: #f4eee3; font-size: 15px; }
+    .dock-button.primary .dock-glyph { color: #5d4219; background: var(--gold); }
+    .reader-loading { min-height: 556px; display: grid; place-items: center; border-radius: 18px; background: var(--paper); box-shadow: var(--shadow-md); }
+    .spinner { width: 36px; height: 36px; border: 3px solid #e7e2d8; border-top-color: var(--leaf); border-radius: 50%; animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .account-layout {
+      display: grid;
+      grid-template-columns: 236px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+      padding-top: 24px;
+    }
+    .account-sidebar {
+      position: sticky;
+      top: calc(var(--header-h) + 20px);
+      padding: 20px 16px;
+      border: 1px solid #e9dfd1;
+      border-radius: 22px;
+      background: rgba(255, 253, 248, .96);
+      box-shadow: var(--shadow-sm);
+    }
+    .account-person { display: flex; align-items: center; gap: 12px; padding: 2px 5px 18px; }
+    .account-avatar {
+      width: 58px;
+      height: 58px;
+      flex: 0 0 58px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--brown);
+      background: #e8d4be;
+      font-family: var(--font-story);
+      font-size: 24px;
+    }
+    .account-person strong { display: block; font-family: var(--font-story); font-size: 17px; line-height: 24px; }
+    .account-person small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 15px; }
+    .child-switch { width: 100%; justify-content: space-between; margin-bottom: 16px; }
+    .account-nav { display: grid; gap: 5px; }
+    .account-nav-button {
+      width: 100%;
+      min-height: 44px;
+      padding: 0 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      border-radius: 12px;
+      color: #4f5d54;
+      background: transparent;
+      font-size: 13px;
+      text-align: left;
+    }
+    .account-nav-button:hover { background: var(--leaf-wash); }
+    .account-nav-button.active { color: #fff; background: var(--leaf); }
+    .account-nav-icon { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 9px; background: rgba(255, 255, 255, .5); }
+    .account-nav-button.active .account-nav-icon { color: #5e4318; background: var(--gold); }
+    .account-side-note { margin-top: 22px; padding: 14px; border-radius: 13px; background: #fbf2e2; color: #62655e; font-size: 10px; line-height: 18px; }
+    .account-main { min-width: 0; padding-bottom: 40px; }
+    .account-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .account-title h1 { margin: 0; font-family: var(--font-story); font-size: 34px; line-height: 43px; }
+    .account-title p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+    .account-hero {
+      min-height: 172px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      overflow: hidden;
+      padding: 26px;
+      border: 1px solid #f0e4d5;
+      border-radius: 22px;
+      background: var(--cream);
+      box-shadow: var(--shadow-sm);
+    }
+    .account-hero-copy { position: relative; z-index: 2; }
+    .account-hero h1 { margin: 0; font-family: var(--font-story); font-size: 31px; line-height: 40px; }
+    .account-hero p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+    .account-hero-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+    .account-hero .hero-illustration {
+      width: 310px;
+      height: 138px;
+      margin-left: auto;
+      overflow: hidden;
+      border-radius: 26px;
+      opacity: .86;
+    }
+    .account-hero .hero-illustration img { width: 100%; height: 100%; object-fit: cover; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .stat-card { padding: 17px 18px; border: 1px solid #eadfd2; border-radius: 17px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .stat-card span { display: block; color: var(--muted); font-size: 10px; line-height: 16px; }
+    .stat-card strong { display: block; margin-top: 9px; font-family: var(--font-story); font-size: 28px; line-height: 36px; font-weight: 600; }
+    .stat-card small { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; line-height: 14px; }
+    .account-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(310px, .9fr); gap: 16px; margin-top: 18px; }
+    .account-card { padding: 20px; border: 1px solid #e9dfd1; border-radius: 20px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .account-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+    .account-card-head h2 { margin: 0; font-family: var(--font-story); font-size: 21px; line-height: 29px; }
+    .account-card-head p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 16px; }
+    .recent-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .recent-book { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px; border-radius: 13px; background: #fffbf4; }
+    .recent-cover { width: 72px; aspect-ratio: 256 / 298; overflow: hidden; border-radius: 6px 8px 8px 6px; background: #e8eee0; }
+    .recent-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .recent-book strong { display: block; font-family: var(--font-story); font-size: 13px; line-height: 20px; }
+    .recent-book small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 14px; }
+    .progress-track { width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: #e5ddd1; }
+    .progress-fill { height: 100%; border-radius: inherit; background: var(--leaf); }
+    .plan-metric { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 9px; color: var(--brown); }
+    .plan-metric strong { font-family: var(--font-story); font-size: 38px; line-height: 44px; font-weight: 500; }
+    .plan-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .activity-list { display: grid; gap: 10px; }
+    .activity-row { display: grid; grid-template-columns: 67px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid #eee7dc; }
+    .activity-row:last-child { border-bottom: 0; }
+    .activity-row time { color: var(--brown); font-size: 10px; line-height: 17px; }
+    .activity-row strong { display: block; font-family: var(--font-story); font-size: 13px; line-height: 20px; }
+    .activity-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 14px; }
+
+    .profile-grid { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 18px; }
+    .profile-card-large { padding: 26px; text-align: center; }
+    .profile-card-large .profile-avatar {
+      width: 126px;
+      height: 126px;
+      margin: 6px auto 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--brown);
+      background: #e8d4be;
+      font-family: var(--font-story);
+      font-size: 45px;
+    }
+    .profile-card-large h2 { margin: 0; font-family: var(--font-story); font-size: 25px; line-height: 34px; }
+    .profile-card-large p { margin: 6px 0 16px; color: var(--muted); font-size: 11px; }
+    .form-card { padding: 24px; }
+    .form-card h2 { margin: 0 0 20px; font-family: var(--font-story); font-size: 24px; }
+    .form-field { display: grid; gap: 7px; margin-bottom: 15px; }
+    .form-field label { color: var(--muted); font-size: 10px; font-weight: 600; }
+    .form-field input, .form-field textarea, .form-field select {
+      width: 100%;
+      min-height: 45px;
+      padding: 10px 13px;
+      border: 1px solid #dcd3c6;
+      border-radius: 10px;
+      color: var(--ink);
+      background: #fffbf4;
+      font-size: 12px;
+    }
+    .form-field textarea { min-height: 94px; resize: vertical; }
+    .form-field input:disabled { color: var(--muted); background: #f7f3ec; }
+    .security-card { margin-top: 18px; padding: 22px; }
+    .security-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-bottom: 1px solid #eee7dc; }
+    .security-row:last-child { border-bottom: 0; padding-bottom: 0; }
+    .security-row strong { display: block; font-size: 12px; }
+    .security-row small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .child-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .child-card { position: relative; padding: 22px; border: 1px solid #e9dfd1; border-radius: 20px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .child-card.current { border: 2px solid #dfa363; background: var(--cream); }
+    .child-head { display: flex; align-items: center; gap: 14px; }
+    .child-avatar { width: 78px; height: 78px; flex: 0 0 78px; display: grid; place-items: center; border-radius: 50%; color: var(--brown); background: #e8d4be; font-family: var(--font-story); font-size: 29px; }
+    .child-head h2 { margin: 0; font-family: var(--font-story); font-size: 25px; line-height: 33px; }
+    .child-detail { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 17px; }
+    .child-actions { display: flex; gap: 8px; margin-top: 22px; }
+    .child-actions button { min-height: 38px; padding: 0 14px; font-size: 11px; }
+    .add-child-card { min-height: 160px; display: grid; place-items: center; border: 1px dashed #cdbba6; border-radius: 20px; color: var(--brown); background: rgba(255, 253, 248, .7); text-align: center; }
+    .add-child-card strong { display: block; margin-top: 7px; font-family: var(--font-story); font-size: 18px; }
+    .add-child-card span { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
+    .shelf-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+    .shelf-filters { display: flex; gap: 7px; flex-wrap: wrap; }
+    .shelf-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; }
+    .shelf-card { position: relative; padding: 13px; border: 1px solid #e8ddcf; border-radius: 16px; background: var(--paper); box-shadow: var(--shadow-sm); }
+    .shelf-card.selected { border-color: #dfa363; box-shadow: 0 0 0 2px rgba(223, 163, 99, .35), var(--shadow-sm); }
+    .shelf-card .shelf-card-cover { aspect-ratio: 256 / 298; overflow: hidden; border-radius: 7px 11px 11px 7px; background: #e8eee0; }
+    .shelf-card .shelf-card-cover img { width: 100%; height: 100%; object-fit: cover; }
+    .shelf-card h3 { min-height: 44px; margin: 11px 0 3px; font-family: var(--font-story); font-size: 16px; line-height: 22px; }
+    .shelf-card p { margin: 0; color: var(--muted); font-size: 9px; line-height: 15px; }
+    .shelf-card .card-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin-top: 12px; }
+    .heart-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #e6d7c6; border-radius: 50%; background: var(--paper); }
+    .heart-button img { width: 17px; height: 17px; object-fit: contain; }
+    .heart-button.active { background: #f8e4dc; }
+    .chart-card { min-height: 300px; }
+    .chart-bars { height: 156px; display: flex; align-items: flex-end; gap: 14px; padding: 18px 8px 0; border-bottom: 1px solid #e8dfd3; }
+    .chart-column { flex: 1; display: grid; align-items: end; gap: 7px; text-align: center; }
+    .chart-column i { display: block; min-height: 5px; border-radius: 8px 8px 3px 3px; background: #ccd9c6; }
+    .chart-column:nth-child(6) i { background: var(--leaf); }
+    .chart-column span { color: var(--muted); font-size: 9px; }
+    .timeline { display: grid; gap: 0; }
+    .timeline-row { position: relative; display: grid; grid-template-columns: 82px 1fr auto; gap: 12px; align-items: center; padding: 12px 0 12px 17px; border-bottom: 1px solid #eee7dc; }
+    .timeline-row::before { content: ""; position: absolute; left: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--leaf); }
+    .timeline-row:last-child { border-bottom: 0; }
+    .timeline-row time { color: var(--muted); font-size: 9px; }
+    .timeline-row strong { font-family: var(--font-story); font-size: 13px; line-height: 19px; }
+    .timeline-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .insight-list { display: grid; gap: 12px; }
+    .insight-row { display: grid; grid-template-columns: 92px 1fr; gap: 12px; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .insight-row strong { color: var(--ink); font-family: var(--font-story); font-size: 13px; font-weight: 500; }
+    .plan-layout { display: grid; grid-template-columns: 410px minmax(0, 1fr); gap: 18px; }
+    .today-plan-card { padding: 22px; border: 1px solid #ead8be; border-radius: 22px; background: var(--cream); box-shadow: var(--shadow-sm); }
+    .today-plan-card h2 { margin: 10px 0 0; font-family: var(--font-story); font-size: 25px; line-height: 34px; }
+    .today-plan-card .plan-recommend { margin-top: 20px; padding: 11px; display: flex; align-items: center; gap: 11px; border-radius: 13px; background: var(--paper); }
+    .plan-recommend img { width: 44px; aspect-ratio: 256 / 298; object-fit: cover; border-radius: 5px 8px 8px 5px; }
+    .plan-recommend strong { display: block; font-family: var(--font-story); font-size: 14px; }
+    .plan-recommend small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .calendar-card { padding: 22px; }
+    .calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .calendar-head h2 { margin: 0; font-family: var(--font-story); font-size: 22px; }
+    .calendar-nav { display: flex; gap: 6px; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; margin-top: 18px; }
+    .calendar-weekday, .calendar-day { min-height: 38px; display: grid; place-items: center; border-radius: 10px; font-size: 10px; }
+    .calendar-weekday { color: var(--muted); }
+    .calendar-day { position: relative; border: 0; color: var(--ink); background: #fffbf4; }
+    .calendar-day:hover { background: var(--leaf-wash); }
+    .calendar-day.empty { background: transparent; pointer-events: none; }
+    .calendar-day.done { color: var(--leaf); background: #edf4e9; }
+    .calendar-day.done::after { content: ""; position: absolute; bottom: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--leaf); }
+    .plan-settings-card { margin-top: 18px; padding: 22px; }
+    .plan-setting-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 0; border-bottom: 1px solid #eee7dc; }
+    .plan-setting-row:last-of-type { border-bottom: 0; }
+    .plan-setting-row span { color: var(--muted); font-size: 11px; }
+    .plan-setting-row strong { font-family: var(--font-story); font-size: 15px; color: var(--brown); }
+    .completion-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+    .completion-grid div { padding: 14px; border-radius: 13px; background: #fffbf4; }
+    .completion-grid span { display: block; color: var(--muted); font-size: 9px; }
+    .completion-grid strong { display: block; margin-top: 7px; color: var(--leaf); font-family: var(--font-story); font-size: 23px; }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      padding: 18px;
+      display: grid;
+      place-items: center;
+      background: rgba(30, 44, 36, .48);
+      backdrop-filter: blur(6px);
+    }
+    .modal-card {
+      width: min(100%, 620px);
+      max-height: calc(100vh - 36px);
+      overflow-y: auto;
+      padding: 24px;
+      border: 1px solid #ded2c2;
+      border-radius: 24px;
+      background: var(--paper);
+      box-shadow: 0 30px 90px rgba(24, 30, 24, .32);
+    }
+    .modal-card.voice-card { width: min(100%, 460px); background: var(--cream); }
+    .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+    .modal-head h2 { margin: 0; font-family: var(--font-story); font-size: 26px; line-height: 34px; }
+    .modal-head p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .modal-close { width: 34px; height: 34px; border: 0; border-radius: 50%; color: var(--muted); background: #f6f1e9; font-size: 20px; line-height: 1; }
+    .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 22px; }
+    .modal-actions .danger { min-height: 44px; border: 1px solid var(--danger); border-radius: 10px; color: #fff; background: var(--danger); }
+    .modal-note { margin: 14px 0 0; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .interest-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+    .interest-option { min-height: 34px; padding: 0 13px; border: 1px solid #e3d6c5; border-radius: 999px; color: var(--brown); background: #fffbf4; font-size: 11px; }
+    .interest-option.selected { color: #fff; background: var(--leaf); border-color: var(--leaf); }
+    .confirm-card { width: min(100%, 460px); }
+    .confirm-card .warning-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; color: var(--danger); background: var(--danger-soft); font-size: 22px; }
+
+    .voice-progress { display: flex; gap: 7px; margin: 2px 0 18px; }
+    .voice-progress span { flex: 1; padding: 7px 4px; border: 1px solid #d6cec2; border-radius: 999px; color: var(--muted); font-size: 9px; text-align: center; }
+    .voice-progress span.active { color: var(--brown); border-color: var(--gold); background: #fff5df; }
+    .voice-progress span.done { color: var(--leaf); border-color: #b9c9b4; background: var(--leaf-pale); }
+    .voice-center { text-align: center; }
+    .mic-button { width: 88px; height: 88px; margin: 4px auto 17px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #5f4317; background: var(--gold); box-shadow: 0 10px 22px rgba(170, 119, 41, .2); font-size: 34px; }
+    .voice-center h3 { margin: 0; font-family: var(--font-story); font-size: 20px; line-height: 28px; }
+    .voice-center p { max-width: 360px; margin: 8px auto 16px; color: var(--muted); font-size: 11px; line-height: 19px; }
+    .voice-wait { min-height: 180px; display: grid; place-items: center; text-align: center; }
+    .voice-error { margin-bottom: 14px; padding: 14px; border-radius: 12px; color: var(--danger); background: var(--danger-soft); font-size: 11px; line-height: 19px; }
+    .transcript-box { padding: 15px; border: 1px solid #e3d7c6; border-radius: 13px; background: var(--paper); }
+    .transcript-box label { display: flex; justify-content: space-between; gap: 10px; color: var(--brown); font-size: 11px; font-weight: 600; }
+    .transcript-box label span { color: var(--muted); font-weight: 400; }
+    .transcript-box textarea { width: 100%; min-height: 100px; margin-top: 10px; padding: 10px; border: 0; outline: 0; resize: vertical; color: var(--ink); background: transparent; font-size: 14px; line-height: 23px; }
+    .answer-card { margin-top: 12px; padding: 16px; border-radius: 13px; background: var(--leaf-pale); }
+    .answer-card strong { display: block; color: var(--leaf); font-size: 11px; }
+    .answer-card p { margin: 8px 0 0; font-family: var(--font-story); font-size: 14px; line-height: 24px; }
+    .tts-row { margin-top: 10px; padding: 11px 13px; display: flex; align-items: center; gap: 11px; border: 1px solid #e8ddcb; border-radius: 12px; background: var(--paper); }
+    .tts-row button { width: 38px; height: 38px; border: 0; border-radius: 50%; color: #5f4317; background: var(--gold); font-size: 15px; }
+    .tts-row strong { display: block; font-size: 11px; }
+    .tts-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .skeleton { border-radius: 10px; background: linear-gradient(90deg, #eee8df 25%, #f8f4ee 37%, #eee8df 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+    @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+    .library-loading { min-height: 530px; display: grid; place-items: center; border-radius: 24px; background: rgba(255, 253, 248, .74); }
+    .library-loading-card { width: min(80%, 520px); display: grid; gap: 12px; }
+    .library-loading-card .skeleton:first-child { height: 250px; }
+    .library-loading-card .skeleton:not(:first-child) { height: 24px; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 26px;
+      z-index: 200;
+      transform: translate(-50%, 20px);
+      min-width: 230px;
+      max-width: min(90vw, 460px);
+      padding: 12px 18px;
+      border: 1px solid #dfe7db;
+      border-radius: 12px;
+      color: var(--ink);
+      background: rgba(255, 253, 248, .97);
+      box-shadow: 0 12px 34px rgba(39, 48, 40, .18);
+      font-size: 12px;
+      line-height: 19px;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1180px) {
+      .header-inner { gap: 15px; }
+      .brand-button { min-width: 175px; }
+      .nav-button { padding-inline: 14px; }
+      .header-search { width: 210px; }
+      .home-hero { grid-template-columns: minmax(290px, .85fr) minmax(330px, 1fr); }
+      .home-info-card { grid-column: 1 / -1; max-width: 680px; justify-self: end; }
+      .library-top-row { grid-template-columns: 340px minmax(0, 1fr); }
+      .account-layout { grid-template-columns: 214px minmax(0, 1fr); }
+    }
+
+    @media (max-width: 900px) {
+      .header-inner { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-block: 10px; }
+      .site-header { height: auto; }
+      .brand-button { min-width: 0; flex: 1; }
+      .header-search { order: 4; width: 100%; }
+      .top-nav { position: static; order: 3; width: 100%; overflow-x: auto; justify-content: flex-start; transform: none; }
+      .nav-button { flex: 1; justify-content: center; }
+      .header-spacer { display: none; }
+      .home-hero, .library-top-row, .detail-card, .reader-layout, .profile-grid, .plan-layout { grid-template-columns: 1fr; }
+      .home-copy { padding-left: 0; }
+      .home-copy h1 { white-space: normal; }
+      .home-info-card { max-width: none; justify-self: stretch; }
+      .home-page { height: auto; min-height: 0; display: block; overflow: visible; padding-bottom: 28px; }
+      .home-hero { min-height: 0; padding: 20px 0 0; }
+      .home-bottom { height: auto; min-height: 0; margin-top: 22px; padding-bottom: 24px; display: flex; flex-direction: column; }
+      .home-plan { height: auto; min-height: 352px; transform: none; }
+      .library-page { padding-top: 22px; }
+      .library-filter-panel { height: auto; }
+      .library-feature-card { height: auto; min-height: 255px; }
+      .library-feature-card { grid-template-columns: 140px minmax(0, 1fr); }
+      .wheel-controls { inset: auto 18px 48px; transform: none; }
+      .carousel-dots { bottom: 12px; }
+      .reader-layout { grid-template-columns: 1fr; }
+      .reader-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .question-card { grid-column: 1 / -1; }
+      .account-layout { grid-template-columns: 1fr; }
+      .account-sidebar { position: static; }
+      .account-nav { grid-template-columns: repeat(3, 1fr); }
+      .account-side-note { display: none; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .account-grid { grid-template-columns: 1fr; }
+      .shelf-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .child-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      :root { --header-h: 64px; --radius-lg: 20px; }
+      .page-width { width: min(calc(100% - 28px), var(--page-max)); }
+      .brand-copy strong { font-size: 20px; }
+      .brand-mark { width: 40px; height: 40px; }
+      .avatar-button { width: 40px; height: 40px; }
+      .home-hero { padding-top: 20px; }
+      .home-copy h1 { font-size: clamp(36px, 11vw, 48px); }
+      .hero-book-stage { min-height: 340px; }
+      .hero-book-cover { width: min(64vw, 260px); }
+      .home-info-card { padding: 18px; }
+      .home-info-card h2 { font-size: 27px; }
+      .home-plan { padding: 17px; }
+      .library-stage { height: 400px; }
+      .wheel-book { width: 170px; }
+      .wheel-controls { inset: auto 14px 54px; transform: none; }
+      .carousel-dots { bottom: 13px; }
+      .library-feature-card { grid-template-columns: 105px minmax(0, 1fr); gap: 15px; padding: 14px; }
+      .library-feature-cover { min-height: 155px; }
+      .library-feature-copy h2 { font-size: 23px; line-height: 31px; }
+      .library-feature-copy > p { font-size: 10px; line-height: 17px; }
+      .book-spread { grid-template-columns: 1fr; }
+      .book-page { min-height: 260px; }
+      .book-page.text-page { min-height: 380px; padding: 28px 22px 22px; }
+      .page-quote { font-size: 22px; line-height: 34px; }
+      .page-text { font-size: 15px; line-height: 27px; }
+      .reader-side { grid-template-columns: 1fr; }
+      .reader-dock { grid-template-columns: repeat(2, 1fr); }
+      .account-title { align-items: flex-start; flex-direction: column; }
+      .account-hero { padding: 20px; }
+      .account-hero h1 { font-size: 27px; line-height: 36px; }
+      .account-hero .hero-illustration { display: none; }
+      .account-nav { grid-template-columns: repeat(2, 1fr); }
+      .recent-list { grid-template-columns: 1fr; }
+      .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .profile-card-large, .form-card, .account-card, .today-plan-card, .calendar-card, .plan-settings-card { padding: 17px; }
+      .completion-grid { grid-template-columns: 1fr; }
+      .modal-card { padding: 18px; }
+      .modal-actions { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <!-- OpenPageFlip 0.7.0, MIT: https://github.com/benhonda/openpageflip -->
+  <script src="./assets/vendor/openpageflip/index.iife.js"></script>
+  <script>
+    (() => {
+      "use strict";
+
+      const app = document.getElementById("app");
+      const toastEl = document.getElementById("toast");
+      let activeReaderFlip = null;
+
+      const assets = {
+        homeBg: "./assets/figma-prototype/home-background.png",
+        libraryBg: "./assets/figma-prototype/library-background.png",
+        homeBookBase: "./assets/figma-prototype/home-book-background.png",
+        homeMainCover: "./assets/figma-prototype/home-main-cover.png",
+        shelfCover1: "./assets/figma-prototype/home-shelf-cover-1.png",
+        shelfCover2: "./assets/figma-prototype/home-shelf-cover-2.png",
+        libraryCover: "./assets/figma-prototype/library-featured-cover.png",
+        bookShell: "./assets/figma-prototype/book-shell.png",
+        warmBook: "./assets/book-cover.svg",
+        rabbitScene: "./assets/reader-scene.svg",
+        iconUsers: "./assets/figma-prototype/icon-users.svg",
+        iconClock: "./assets/figma-prototype/icon-clock.svg",
+        iconBookmark: "./assets/figma-prototype/icon-bookmark.svg",
+        iconHouse: "./assets/figma-prototype/icon-house.svg",
+        shelfSurface: "./assets/figma-prototype/shelf-combined.svg",
+        shelfHeading: "./assets/figma-prototype/shelf-heading.svg",
+        heart: "./assets/figma-prototype/favorite-heart.svg"
+      };
+
+      const books = [
+        {
+          id: "bear",
+          title: "小熊的森林故事会",
+          author: "[英] 利兹·布朗",
+          age: "3–6 岁",
+          pages: 15,
+          minutes: 10,
+          topics: ["友谊", "自然", "分享"],
+          features: ["亲子陪伴", "想象力"],
+          scenes: ["睡前共读", "亲子互动"],
+          cover: assets.homeMainCover,
+          summary: "这是一个关于阅读、友谊与分享的温暖故事，让孩子在轻松有趣的情节中，感受阅读的快乐，发现书本里的奇妙世界。",
+          quote: "“把喜欢的故事讲给别人听，快乐就会变成两份。”",
+          status: "已发布"
+        },
+        {
+          id: "bunny",
+          title: "逃家小兔",
+          author: "[美] 玛格丽特·怀兹·布朗",
+          age: "3–5 岁",
+          pages: 6,
+          minutes: 6,
+          topics: ["亲子依恋", "动物", "想象"],
+          features: ["亲子陪伴", "情绪认知"],
+          scenes: ["睡前共读", "亲子互动"],
+          cover: assets.shelfCover1,
+          summary: "小兔子说想跑走，妈妈用温柔又聪明的方式一路追着它。",
+          quote: "“如果你跑走了，我就去追你，因为你是我的小宝贝呀。”",
+          status: "已发布"
+        },
+        {
+          id: "guess",
+          title: "猜猜我有多爱你",
+          author: "[爱尔兰] 山姆·麦克布雷尼",
+          age: "3–6 岁",
+          pages: 8,
+          minutes: 8,
+          topics: ["亲子依恋", "自然", "动物"],
+          features: ["亲子陪伴", "情绪认知"],
+          scenes: ["睡前共读"],
+          cover: assets.shelfCover2,
+          summary: "小兔子和大兔子比赛谁的爱更多，在温柔的想象里感受彼此的爱。",
+          quote: "“我爱你，一直到月亮那里，再从月亮上回到这里来。”",
+          status: "已发布"
+        },
+        {
+          id: "prince",
+          title: "小王子",
+          author: "[法] 安托万·德·圣埃克苏佩里",
+          age: "6–10 岁",
+          pages: 12,
+          minutes: 12,
+          topics: ["童话", "成长", "友谊"],
+          features: ["想象力", "成长启蒙"],
+          scenes: ["亲子互动", "自由阅读"],
+          cover: assets.libraryCover,
+          summary: "一个关于爱、陪伴与责任的成长故事，让孩子在星球旅途中理解什么才是真正重要的。",
+          quote: "“只有用心，才能看得清楚。真正重要的东西，用眼睛是看不见的。”",
+          status: "已发布"
+        },
+        {
+          id: "moon",
+          title: "月亮的味道",
+          author: "麦克·格雷涅茨",
+          age: "3–6 岁",
+          pages: 10,
+          minutes: 10,
+          topics: ["自然", "合作", "动物"],
+          features: ["想象力", "合作成长"],
+          scenes: ["亲子互动", "自由阅读"],
+          cover: assets.warmBook,
+          summary: "小动物们一个叠着一个，想尝一尝月亮的味道。",
+          quote: "“大家一起想办法，远一点的目标也会变得近一点。”",
+          status: "原型样例"
+        },
+        {
+          id: "david",
+          title: "大卫，不可以",
+          author: "大卫·香农",
+          age: "3–6 岁",
+          pages: 7,
+          minutes: 7,
+          topics: ["成长", "规则", "家庭"],
+          features: ["成长启蒙", "情绪认知"],
+          scenes: ["亲子互动"],
+          cover: assets.rabbitScene,
+          summary: "在一次次“不可以”的提醒里，孩子学会边界，也确认自己一直被爱着。",
+          quote: "“爱不是没有规则，而是一直在身旁。”",
+          status: "原型样例"
+        }
+      ];
+
+      const bunnyPages = [
+        ["从前有一只小兔子，他很想要离家出走。有一天，他对妈妈说：“我要跑走啦！”", "小兔子为什么说想跑走？", "可以让孩子先观察画面，再说说自己有没有过“想跑出去看看”的时刻。", "小兔子站在屋子中间，看着妈妈。"],
+        ["“如果你跑走了，”妈妈说，“我就要去追你，因为你是我的小宝贝呀！”", "妈妈听到小兔子想跑走时，是什么心情？", "引导孩子从妈妈的表情、动作和语气里找线索。", "兔妈妈弯腰看着小兔子，微笑着。"],
+        ["“如果你来追我，”小兔子说，“我就要变成溪里的小鳟鱼，游得远远的。”", "如果你是小兔子，你想变成什么？", "鼓励孩子自由想象，并把想象中的画面说出来。", "小兔子想象自己变成了一条红色的鱼在水里游。"],
+        ["“如果你变成溪里的小鳟鱼，”妈妈说，“我就变成捕鱼的人去抓你。”", "妈妈为什么总能找到小兔子？", "帮助孩子理解妈妈的爱和坚持，而不是把问题当成输赢。", "兔妈妈拿着钓鱼竿，鱼钩上挂着一根胡萝卜。"],
+        ["“如果你变成捕鱼的人，”小兔子说，“我就要变成高山上的大石头，让你抓不到我。”", "变成大石头之后，小兔子还会觉得孤单吗？", "可以请孩子说说，一个人待着和有人陪伴有什么不同。", "小兔子想象自己变成了一块高高的石头。"],
+        ["“如果你变成高山上的大石头，”妈妈说，“我就变成爬山的人，爬到高山上去找你。”", "最后，小兔子还想去很远的地方吗？", "回到故事开头，让孩子比较小兔子前后心情的变化。", "兔妈妈背着背包，拿着登山杖在爬山。"]
+      ];
+
+      const libraryFilterOptions = {
+        年龄: ["3–4 岁", "4–5 岁", "5–6 岁", "6 岁以上"],
+        主题: ["动物", "自然", "友谊", "童话", "成长"],
+        阅读时长: ["5 分钟以内", "5–10 分钟", "10 分钟以上"],
+        绘本特色: ["亲子陪伴", "想象力", "成长启蒙", "情绪认知", "合作成长"],
+        阅读场景: ["睡前共读", "亲子互动", "自由阅读"]
+      };
+
+      const childSeeds = [
+        { id: "man", name: "小满", age: 4, birthday: "2022-03-18", gender: "女", interests: ["动物", "自然", "冒险"], color: "#e8d4be" },
+        { id: "he", name: "阿禾", age: 6, birthday: "2020-09-06", gender: "男", interests: ["童话", "科学", "友谊"], color: "#dce8d4" }
+      ];
+
+      const historySeed = [
+        { id: "h1", childId: "man", bookId: "guess", date: "2026-11-17T19:20:00", minutes: 12, pages: 8, interactions: 3 },
+        { id: "h2", childId: "man", bookId: "bunny", date: "2026-11-16T20:05:00", minutes: 9, pages: 6, interactions: 2 },
+        { id: "h3", childId: "man", bookId: "prince", date: "2026-11-14T19:10:00", minutes: 15, pages: 12, interactions: 4 },
+        { id: "h4", childId: "he", bookId: "moon", date: "2026-11-13T18:40:00", minutes: 10, pages: 10, interactions: 2 }
+      ];
+
+      const storageKey = "zhiya-prototype-v3";
+      const saved = readStorage();
+      const state = {
+        view: "home",
+        selectedBookId: "bear",
+        libraryCategory: "全部",
+        libraryOption: null,
+        librarySearch: "",
+        libraryLoading: false,
+        libraryMotionFrom: null,
+        reader: { pageIndex: 0, audio: "idle", loading: false, completed: false, feedback: "" },
+        voice: { open: false, stage: "idle", transcript: "", question: "", answer: "", playback: "idle", error: "" },
+        account: { section: "overview", shelfFilter: "全部", childId: saved.childId || "man", childEditor: null, deleteId: null, planEditor: false },
+        profile: saved.profile || { nickname: "沐沐妈妈", account: "zhiya_parent_01", signature: "和孩子一起，把每个普通夜晚读成温暖的故事。" },
+        children: saved.children || childSeeds,
+        favorites: saved.favorites || ["bear", "bunny", "guess", "prince"],
+        history: saved.history || historySeed,
+        plan: saved.plan || { books: 1, minutes: 15, weekly: 5 },
+        planDraft: null,
+        libraryReady: false,
+        readerImageError: false,
+        shelfMotion: null,
+        speech: null,
+        recordTimer: null
+      };
+
+      function readStorage() {
+        try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; }
+      }
+
+      function save() {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify({
+            profile: state.profile,
+            children: state.children,
+            childId: state.account.childId,
+            favorites: state.favorites,
+            history: state.history,
+            plan: state.plan
+          }));
+        } catch {
+          // The prototype remains usable when storage is blocked.
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+      }
+
+      function safeArray(value) {
+        return Array.isArray(value) ? value : [];
+      }
+
+      function currentBook() {
+        return books.find((book) => book.id === state.selectedBookId) || books[0];
+      }
+
+      function currentChild() {
+        return state.children.find((child) => child.id === state.account.childId) || state.children[0] || childSeeds[0];
+      }
+
+      function bookById(id) {
+        return books.find((book) => book.id === id) || books[0];
+      }
+
+      function pagesFor(book) {
+        if (book.id === "bunny") {
+          return bunnyPages.slice(0, book.pages).map((page, index) => ({
+            no: index + 1,
+            text: page[0],
+            question: page[1],
+            answer: page[2],
+            illustrationText: page[3]
+          }));
+        }
+        const motifs = ["一起发现", "温柔商量", "大胆想象", "互相帮助", "懂得分享", "勇敢表达"];
+        const questions = [
+          "你觉得这一页里，谁最需要帮助？",
+          "如果你也在画面里，你想做什么？",
+          "故事里的人物为什么会这样选择？",
+          "接下来可能会发生什么？"
+        ];
+        return Array.from({ length: book.pages }, (_, index) => ({
+          no: index + 1,
+          text: index === 0
+            ? `${book.title}的故事从一段安静的相遇开始。${book.summary}`
+            : `${motifs[index % motifs.length]}。故事里的小主人公继续往前走，和朋友一起寻找答案，也慢慢学会把自己的感受说出来。`,
+          question: questions[index % questions.length],
+          answer: "可以请孩子先指出画面里的角色和动作，再尝试说出自己的理解。答案没有唯一标准，重要的是愿意表达和倾听。",
+          illustrationText: `${book.title} · 第 ${index + 1} 页`
+        }));
+      }
+
+      function showToast(message) {
+        toastEl.textContent = message;
+        toastEl.classList.add("show");
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => toastEl.classList.remove("show"), 2400);
+      }
+
+      function setView(view, options = {}) {
+        state.view = view;
+        if (options.bookId) state.selectedBookId = options.bookId;
+        if (view === "library") {
+          if (!state.libraryReady) {
+            state.libraryLoading = true;
+            window.setTimeout(() => {
+              state.libraryLoading = false;
+              state.libraryReady = true;
+              if (state.view === "library") render();
+            }, 260);
+          }
+        }
+        if (view === "reader") {
+          state.reader.loading = true;
+          state.reader.completed = false;
+          window.setTimeout(() => {
+            state.reader.loading = false;
+            if (state.view === "reader") render();
+          }, 180);
+        }
+        const hash = options.hash || (
+          view === "account" ? `account/${state.account.section}` :
+          view === "reader" ? `reader/${state.selectedBookId}/${state.reader.pageIndex + 1}` :
+          view === "detail" ? `detail/${state.selectedBookId}` : view
+        );
+        if (location.hash !== `#${hash}`) history.pushState(null, "", `#${hash}`);
+        render();
+        window.scrollTo({ top: 0, behavior: "instant" });
+      }
+
+      function parseHash() {
+        const hash = location.hash.replace(/^#/, "") || "home";
+        const parts = hash.split("/");
+        if (parts[0] === "account") {
+          const section = ["overview", "profile", "children", "shelf", "growth", "plan"].includes(parts[1]) ? parts[1] : "overview";
+          state.account.section = section;
+          return "account";
+        }
+        if (parts[0] === "detail" && bookById(parts[1])) {
+          state.selectedBookId = parts[1];
+          return "detail";
+        }
+        if (parts[0] === "reader" && bookById(parts[1])) {
+          state.selectedBookId = parts[1];
+          state.reader.pageIndex = Math.max(0, Math.min(bookById(parts[1]).pages - 1, Number(parts[2] || 1) - 1));
+          return "reader";
+        }
+        if (["home", "library"].includes(parts[0])) return parts[0];
+        return "home";
+      }
+
+      function navButton(label, view, active, icon, section = "") {
+        return `<button class="nav-button ${active ? "active" : ""}" type="button" data-action="go" data-view="${view}"${section ? ` data-section="${section}"` : ""}>
+          ${icon ? `<img class="nav-icon" src="${assets[icon]}" alt="">` : ""}<span>${label}</span>
+        </button>`;
+      }
+
+      function header(view) {
+        const active = view === "home" ? "home" : view === "library" || view === "detail" ? "library" : view === "reader" ? "reader" : "account";
+        return `
+          <header class="site-header">
+            <div class="page-width header-inner">
+              <button class="brand-button" type="button" data-action="go" data-view="home" aria-label="返回知芽绘本首页">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-copy"><strong>知芽绘本</strong><small>AI 亲子共读</small></span>
+              </button>
+              <nav class="top-nav" aria-label="主导航">
+                ${navButton("首页", "home", active === "home", "iconHouse")}
+                ${navButton("绘本馆", "library", active === "library", "iconBookmark")}
+                ${navButton("成长记录", "account", false, "iconClock", "growth")}
+                ${navButton("亲子时光", "account", active === "account", "iconUsers")}
+              </nav>
+              <div class="header-spacer"></div>
+              <form class="header-search" id="search-form" role="search">
+                <label class="sr-only" for="search-input">搜索绘本</label>
+                <input id="search-input" name="search" value="${escapeHtml(state.librarySearch)}" placeholder="搜索绘本、作者或主题">
+              </form>
+              <button class="avatar-button" type="button" data-action="go" data-view="account" aria-label="打开个人中心">沐</button>
+            </div>
+          </header>`;
+      }
+
+      function coverImage(book, className = "") {
+        return `<img class="${className}" src="${book.cover}" alt="${escapeHtml(book.title)}封面">`;
+      }
+
+      function homePage() {
+        const shelfBook = bookById(state.selectedBookId);
+        const book = shelfBook || books[0];
+        const shelfIndex = books.findIndex((item) => item.id === shelfBook.id);
+        const shelfSequence = [-1, 0, 1, 2, 3].map((offset) => books[(shelfIndex + offset + books.length) % books.length]);
+        const previousShelfBook = shelfSequence[0];
+        const shelfNeighbors = shelfSequence.slice(2, 5);
+        return `
+          ${header("home")}
+          <main class="home-page page-width">
+            <section class="home-hero" aria-labelledby="home-title">
+              <div class="home-copy">
+                <p class="eyebrow">亲子共读 · 从今天开始</p>
+                <h1 id="home-title"><span>和孩子一起</span><span>打开更大的世界</span></h1>
+                <p>在绘本中，遇见更有趣的故事。选一本，和孩子慢慢读。</p>
+                <button class="primary" type="button" data-action="go" data-view="library">开始探索 →</button>
+              </div>
+              <div class="hero-book-stage" aria-label="本周精选绘本">
+                <img class="hero-book-base" src="${assets.homeBookBase}" alt="">
+                <button class="hero-book-cover" type="button" data-action="open-detail" data-id="${book.id}" aria-label="查看《${escapeHtml(book.title)}》">
+                  ${coverImage(book)}
+                </button>
+              </div>
+              <article class="home-info-card">
+                <span class="pill">已发布 · 亲子共读</span>
+                <h2>${escapeHtml(book.title)}</h2>
+                <p class="author">${escapeHtml(book.author)}</p>
+                <div class="book-meta"><span>${book.age}</span><span>${book.pages} 页</span><span>约 ${book.minutes} 分钟</span></div>
+                <p class="summary">${escapeHtml(book.summary)}</p>
+                <div class="card-actions">
+                  <button class="primary" type="button" data-action="start-reading" data-id="${book.id}">开始阅读</button>
+                  <button class="secondary" type="button" data-action="toggle-favorite" data-id="${book.id}">${state.favorites.includes(book.id) ? "已加入书架" : "加入书架"}</button>
+                </div>
+              </article>
+            </section>
+
+            <section class="home-bottom">
+              <section class="featured-shelf" aria-labelledby="shelf-title">
+                <div class="shelf-canvas ${state.shelfMotion ? `swap-${state.shelfMotion}` : ""}">
+                  <img class="shelf-surface-art" src="${assets.shelfSurface}" alt="">
+                  <div class="shelf-title-row">
+                    <div class="shelf-heading-line"><img src="${assets.shelfHeading}" alt=""><h2 id="shelf-title">精选绘本</h2></div>
+                    <button class="text-button" type="button" data-action="go" data-view="library">查看更多 →</button>
+                  </div>
+                  <div class="shelf-showcase">
+                    <button class="shelf-showcase-book previous" type="button" data-action="open-detail" data-id="${previousShelfBook.id}" aria-label="查看《${escapeHtml(previousShelfBook.title)}》">
+                      ${coverImage(previousShelfBook)}
+                    </button>
+                    <button class="shelf-showcase-book featured" type="button" data-action="open-detail" data-id="${shelfBook.id}" aria-label="查看《${escapeHtml(shelfBook.title)}》">
+                      ${coverImage(shelfBook)}
+                    </button>
+                    ${["one", "two", "three"].map((slot, index) => {
+                      const item = shelfNeighbors[index];
+                      return item
+                        ? `<button class="shelf-showcase-book ${slot}" type="button" data-action="open-detail" data-id="${item.id}" aria-label="查看《${escapeHtml(item.title)}》">${coverImage(item)}</button>`
+                        : `<div class="shelf-placeholder ${slot}">预留绘本位<br>等待仓库内容补充</div>`;
+                    }).join("")}
+                  </div>
+                  <button class="shelf-arrow-hit previous" type="button" data-action="shelf-prev" aria-label="查看前面的绘本">‹</button>
+                  <button class="shelf-arrow-hit next" type="button" data-action="shelf-next" aria-label="查看后面的绘本">›</button>
+                </div>
+              </section>
+              <aside class="home-plan">
+                <span class="home-plan-kicker">✦ 今日阅读计划</span>
+                <div class="home-plan-time"><strong>${state.plan.minutes}</strong><span>分钟</span></div>
+                <h2>和孩子一起，共读一本绘本吧！</h2>
+                <blockquote>“只有用心，才能看见故事里真正的光。”</blockquote>
+                <button class="primary" type="button" data-action="start-reading" data-id="${book.id}">开始阅读</button>
+                <span class="home-plan-note">阅读进度仅保存在当前浏览器</span>
+              </aside>
+            </section>
+          </main>`;
+      }
+
+      function filteredBooks() {
+        const query = state.librarySearch.trim().toLowerCase();
+        let result = books.filter((book) => {
+          const haystack = [book.title, book.author, book.age, ...book.topics].join(" ").toLowerCase();
+          return !query || haystack.includes(query);
+        });
+        if (state.libraryCategory === "年龄" && state.libraryOption) {
+          const ageRanges = {
+            "3–4 岁": [3, 4],
+            "4–5 岁": [4, 5],
+            "5–6 岁": [5, 6],
+            "6 岁以上": [6, 99]
+          };
+          const [targetMin, targetMax] = ageRanges[state.libraryOption] || [3, 6];
+          result = result.filter((book) => {
+            const [min, max] = book.age.split(/[–-]/).map((value) => Number(value.replace(/\D/g, "")));
+            return Number.isFinite(min) && Number.isFinite(max) && min <= targetMax && max >= targetMin;
+          });
+        } else if (state.libraryCategory === "主题" && state.libraryOption) {
+          result = result.filter((book) => book.topics.includes(state.libraryOption));
+        } else if (state.libraryCategory === "阅读时长" && state.libraryOption) {
+          result = result.filter((book) => {
+            if (state.libraryOption === "5 分钟以内") return book.minutes <= 5;
+            if (state.libraryOption === "5–10 分钟") return book.minutes > 5 && book.minutes <= 10;
+            return book.minutes > 10;
+          });
+        } else if (state.libraryCategory === "绘本特色" && state.libraryOption) {
+          result = result.filter((book) => book.features.includes(state.libraryOption));
+        } else if (state.libraryCategory === "阅读场景" && state.libraryOption) {
+          result = result.filter((book) => book.scenes.includes(state.libraryOption));
+        }
+        return result;
+      }
+
+      function libraryPage() {
+        const visible = filteredBooks();
+        const selected = visible.find((book) => book.id === state.selectedBookId) || visible[0] || null;
+        if (selected) state.selectedBookId = selected.id;
+        const categories = ["全部", "年龄", "主题", "阅读时长", "绘本特色", "阅读场景"];
+        const options = state.libraryCategory === "全部" ? [] : (libraryFilterOptions[state.libraryCategory] || []);
+        return `
+          ${header("library")}
+          <main class="page page-width library-page">
+            <div class="library-content">
+              <div class="library-top-row">
+                <aside class="library-filter-panel ${state.libraryCategory !== "全部" ? "expanded" : ""}" aria-labelledby="library-title">
+                  <h2 id="library-title">绘本馆</h2>
+                  <p>发现适合孩子的每一本好故事</p>
+                  <div class="library-category-rows">
+                    <div class="library-category-row">
+                      ${categories.slice(0, 4).map((category) => `
+                        <button class="library-category-chip ${state.libraryCategory === category ? "active" : ""}" type="button" data-action="library-category" data-value="${category}" aria-expanded="${category !== "全部" && state.libraryCategory === category}">${category}</button>`).join("")}
+                    </div>
+                    <div class="library-category-row">
+                      ${categories.slice(4).map((category) => `
+                        <button class="library-category-chip ${state.libraryCategory === category ? "active" : ""}" type="button" data-action="library-category" data-value="${category}" aria-expanded="${category !== "全部" && state.libraryCategory === category}">${category}</button>`).join("")}
+                    </div>
+                  </div>
+                  ${options.length ? `
+                    <div class="library-filter-expand">
+                      <strong>${escapeHtml(state.libraryCategory)}：选择具体条件</strong>
+                      <div class="library-option-list">
+                        ${["全部", ...options].map((option) => `
+                          <button class="library-option-chip ${(option === "全部" ? !state.libraryOption : state.libraryOption === option) ? "active" : ""}" type="button" data-action="library-option" data-value="${option}">${option}</button>`).join("")}
+                      </div>
+                    </div>` : ""}
+                </aside>
+                ${state.libraryLoading ? `
+                  <div class="library-feature-card"><div class="library-feature-cover skeleton"></div><div><div class="skeleton" style="height:22px;width:46%"></div><div class="skeleton" style="height:38px;width:68%;margin-top:13px"></div><div class="skeleton" style="height:18px;width:54%;margin-top:12px"></div><div class="skeleton" style="height:56px;margin-top:16px"></div></div></div>` :
+                  selected ? `
+                    <article class="library-feature-card">
+                      <div class="library-feature-cover">${coverImage(selected)}</div>
+                      <div class="library-feature-copy">
+                        <span class="pill">${selected.status} · 亲子共读</span>
+                        <h2>${escapeHtml(selected.title)}</h2>
+                        <p>${escapeHtml(selected.author)} · ${selected.age} · ${selected.pages} 页 · 约 ${selected.minutes} 分钟</p>
+                        <div class="reason-box"><strong>为什么推荐：</strong>${escapeHtml(selected.summary)}</div>
+                        <div class="feature-actions">
+                          <button class="primary" type="button" data-action="open-detail" data-id="${selected.id}">查看详情</button>
+                          <button class="secondary" type="button" data-action="toggle-favorite" data-id="${selected.id}">${state.favorites.includes(selected.id) ? "已加入书架" : "加入书架"}</button>
+                        </div>
+                      </div>
+                    </article>` : `
+                    <div class="empty-state"><div><h2>没有找到符合条件的绘本</h2><p>可以切换筛选条件，或查看全部绘本。</p><button class="primary" type="button" data-action="clear-library">查看全部绘本</button></div></div>`}
+              </div>
+              ${state.libraryLoading ? "" : visible.length ? `
+                <section class="library-stage" aria-label="绘本轮播">
+                    <div class="book-wheel-panel">
+                      <div class="book-wheel">
+                        ${visible.map((book, index) => `
+                          <button class="wheel-book ${book.id === selected?.id ? "selected" : ""}" type="button" data-action="select-book" data-id="${book.id}" data-index="${index}" aria-current="${book.id === selected?.id ? "true" : "false"}" aria-label="选择《${escapeHtml(book.title)}》">
+                            <span class="wheel-book-shell">
+                              <img class="book-shell" src="${assets.bookShell}" alt="">
+                              <span class="wheel-cover">${coverImage(book)}</span>
+                            </span>
+                          </button>`).join("")}
+                      </div>
+                      <div class="carousel-dots" aria-label="绘本位置">
+                        ${visible.map((book) => `
+                          <button class="carousel-dot ${book.id === selected?.id ? "active" : ""}" type="button" data-action="select-book" data-id="${book.id}" aria-label="切换到《${escapeHtml(book.title)}》" aria-current="${book.id === selected?.id ? "true" : "false"}"></button>`).join("")}
+                      </div>
+                      <div class="wheel-controls">
+                        <button class="round-button" type="button" data-action="wheel-prev" aria-label="切换到上一本">‹</button>
+                        <button class="round-button" type="button" data-action="wheel-next" aria-label="切换到下一本">›</button>
+                      </div>
+                    </div>
+                </section>` : ""}
+            </div>
+          </main>`;
+      }
+
+      function detailPage() {
+        const book = currentBook();
+        return `
+          ${header("detail")}
+          <main class="detail-page page-width">
+            <div class="detail-toolbar">
+              <button class="secondary" type="button" data-action="go" data-view="library">← 返回绘本馆</button>
+              <span class="detail-breadcrumb">绘本馆 / ${escapeHtml(book.topics[0])} / ${escapeHtml(book.title)}</span>
+            </div>
+            <article class="detail-card">
+              <div class="detail-cover-wrap"><div class="detail-cover">${coverImage(book)}</div></div>
+              <div class="detail-copy">
+                <span class="pill">${book.status} · 亲子共读</span>
+                <h1>${escapeHtml(book.title)}</h1>
+                <p class="detail-author">作者：${escapeHtml(book.author)}</p>
+                <div class="book-meta"><span>${book.age}</span><span>${book.pages} 页</span><span>约 ${book.minutes} 分钟</span><span>${escapeHtml(book.topics.join(" · "))}</span></div>
+                <p class="detail-summary">${escapeHtml(book.summary)}</p>
+                <blockquote class="detail-quote">${escapeHtml(book.quote)}</blockquote>
+                <div class="detail-actions">
+                  <button class="primary" type="button" data-action="start-reading" data-id="${book.id}">开始阅读</button>
+                  <button class="secondary" type="button" data-action="toggle-favorite" data-id="${book.id}">${state.favorites.includes(book.id) ? "已加入书架" : "加入书架"}</button>
+                </div>
+              </div>
+            </article>
+          </main>`;
+      }
+
+      function readerAudioNotice(page) {
+        if (state.reader.audio === "idle") return "";
+        const message = state.reader.audio === "playing"
+          ? `正在朗读第 ${page.no} 页`
+          : state.reader.audio === "paused"
+            ? "朗读已暂停"
+            : "朗读暂时无法播放，文字仍可阅读";
+        return `<div class="side-card audio"><div class="audio-line"><span>${message}</span><button type="button" data-action="narration">${state.reader.audio === "playing" ? "暂停" : "继续"}</button></div></div>`;
+      }
+
+      function readerFeedbackNotice() {
+        if (!state.reader.feedback) return "";
+        return `<div class="reason-box">${state.reader.feedback === "understood" ? "继续追问：如果你是小主人公，你还会怎么选择？" : "一起看画面：先说出现在画面里的人物和动作，再慢慢回答。"}</div>`;
+      }
+
+      function readerPage() {
+        const book = currentBook();
+        const storyPages = pagesFor(book);
+        const pageIndex = Math.min(state.reader.pageIndex, storyPages.length - 1);
+        const page = storyPages[pageIndex];
+        return `
+          ${header("reader")}
+          <main class="reader-page page-width">
+            <div class="reader-heading">
+              <div>
+                <button class="text-button" type="button" data-action="open-detail" data-id="${book.id}">← 返回绘本详情</button>
+                <h1>${escapeHtml(book.title)}</h1>
+                <p data-reader-progress>第 ${page.no} / ${book.pages} 页 · 与孩子一起慢慢读</p>
+              </div>
+              <span class="pill">${state.reader.completed ? "本次阅读已完成" : "亲子共读模式"}</span>
+            </div>
+            <div class="reader-layout">
+              <section class="reader-main">
+                ${state.reader.loading ? `<div class="reader-loading"><div><div class="spinner" style="margin:0 auto 12px"></div><p>正在翻开这一页…</p></div></div>` : `
+                  <div class="flipbook-stage">
+                    <div class="flipbook-book" id="zhiya-flipbook" aria-label="${escapeHtml(book.title)}软页绘本">
+                      ${storyPages.map((storyPage, index) => `
+                        <section class="flip-page flip-page--illustration" data-density="soft" aria-label="第 ${storyPage.no} 页插图">
+                          ${state.readerImageError
+                            ? `<div class="flip-page-empty"><div class="empty-state"><div><h2>插图暂时无法显示</h2><p>文字内容仍可继续阅读。</p><button class="secondary" type="button" data-action="retry-image">重新加载</button></div></div></div>`
+                            : `<img src="${book.cover}" alt="${escapeHtml(storyPage.illustrationText)}" draggable="false" onerror="window.__zhiyaImageError && window.__zhiyaImageError()">`}
+                        </section>
+                        <section class="flip-page flip-page--text" data-density="soft" aria-label="第 ${storyPage.no} 页文字">
+                          <div class="flip-page-inner flip-page-inner--text">
+                            <p class="eyebrow">${escapeHtml(book.title)} · 第 ${storyPage.no} 页</p>
+                            <blockquote class="page-quote">${escapeHtml(book.quote)}</blockquote>
+                            <p class="page-text">${escapeHtml(storyPage.text)}</p>
+                            <div class="page-number"><span>第 ${storyPage.no} 页 · 共 ${book.pages} 页</span><span class="page-dots">${storyPages.map((_, dotIndex) => `<i class="${dotIndex === index ? "active" : ""}"></i>`).join("")}</span></div>
+                          </div>
+                        </section>`).join("")}
+                    </div>
+                    <p class="flip-hint">拖动书页边缘，或点击外侧翻页</p>
+                  </div>`}
+                <nav class="reader-dock" aria-label="阅读控制">
+                  <button class="dock-button" type="button" data-action="prev-page" data-reader-prev ${pageIndex === 0 ? "disabled" : ""}><span class="dock-glyph">‹</span>上一页</button>
+                  <button class="dock-button" type="button" data-action="narration"><span class="dock-glyph">${state.reader.audio === "playing" ? "Ⅱ" : "▶"}</span>${state.reader.audio === "playing" ? "暂停朗读" : "朗读"}</button>
+                  <button class="dock-button primary" type="button" data-action="open-voice"><span class="dock-glyph">芽</span>问知芽</button>
+                  <button class="dock-button" type="button" data-action="${pageIndex >= storyPages.length - 1 ? "finish-reading" : "next-page"}" data-reader-next><span class="dock-glyph">${pageIndex >= storyPages.length - 1 ? "✓" : "›"}</span>${pageIndex >= storyPages.length - 1 ? "完成" : "下一页"}</button>
+                </nav>
+              </section>
+              <aside class="reader-side">
+                <div data-reader-audio-slot>${readerAudioNotice(page)}</div>
+                <section class="side-card question-card">
+                  <h2>✦ 共读小提问</h2>
+                  <p data-reader-question>${escapeHtml(page.question)}</p>
+                  <div class="question-actions">
+                    <button class="secondary" type="button" data-action="reader-feedback" data-value="understood">已理解</button>
+                    <button class="secondary" type="button" data-action="reader-feedback" data-value="not-understood">还没懂</button>
+                    <button class="primary" type="button" data-action="open-voice">孩子来回答</button>
+                  </div>
+                  <div data-reader-feedback-slot>${readerFeedbackNotice()}</div>
+                </section>
+                <section class="side-card parent-tip"><h2>给家长的共读提示</h2><p data-reader-tip>${escapeHtml(page.answer)}</p></section>
+                ${state.reader.completed ? `<section class="side-card"><h2>本次共读完成</h2><p class="address">阅读记录已保存在本机，本次共读页数和互动次数可用于生成阅读小结。</p><button class="primary" type="button" data-action="go" data-view="account" data-section="growth">查看成长记录</button></section>` : ""}
+              </aside>
+            </div>
+          </main>
+          ${state.voice.open ? voiceModal(page) : ""}`;
+      }
+
+      function voiceProgress(stage) {
+        const order = ["idle", "recording", "processing", "confirm", "answer"];
+        const index = Math.max(0, order.indexOf(stage));
+        return `<div class="voice-progress"><span class="${index >= 1 ? "done" : "active"}">录音</span><span class="${index >= 3 ? "done" : index >= 2 ? "active" : ""}">识别</span><span class="${index >= 4 ? "active" : ""}">回答</span></div>`;
+      }
+
+      function voiceModal(page) {
+        let body = "";
+        if (state.voice.stage === "idle") {
+          body = `<div class="voice-center"><button class="mic-button" type="button" data-action="start-voice" aria-label="开始录音">◉</button><h3>点一下，说出你的问题</h3><p>一次只问一个问题。也可以改用文字输入，不影响继续阅读。</p><button class="secondary" type="button" data-action="voice-text">不方便录音，改用文字</button></div>`;
+        } else if (state.voice.stage === "recording") {
+          body = `<div class="voice-wait"><div><div class="spinner" style="margin:0 auto 14px"></div><h3>正在录音</h3><p>说完后点击“停止录音”</p><button class="primary" type="button" data-action="stop-voice">停止录音</button></div></div>`;
+        } else if (state.voice.stage === "processing") {
+          body = `<div class="voice-wait"><div><div class="spinner" style="margin:0 auto 14px"></div><h3>正在听清这个问题</h3><p>识别完成后会先请你确认文字。</p></div></div>`;
+        } else if (state.voice.stage === "failure") {
+          body = `<div class="voice-error"><strong>没有听清这句话</strong><p>${escapeHtml(state.voice.error || "可以重新录音，也可以直接输入问题。")}</p></div><div class="modal-actions"><button class="primary" type="button" data-action="start-voice">重新录音</button><button class="secondary" type="button" data-action="voice-text">改用文字输入</button></div>`;
+        } else if (state.voice.stage === "confirm" || state.voice.stage === "text") {
+          body = `<form id="voice-form"><div class="transcript-box"><label for="voice-input">${state.voice.stage === "confirm" ? "识别到的问题" : "输入孩子的问题"}<span>可以修改</span></label><textarea id="voice-input" name="question" placeholder="例如：为什么小兔子想跑走？">${escapeHtml(state.voice.transcript)}</textarea></div><div class="modal-actions"><button class="secondary" type="button" data-action="start-voice">重新录音</button><button class="primary" type="submit">确认并询问知芽</button></div></form>`;
+        } else if (state.voice.stage === "answering") {
+          body = `<div class="voice-wait"><div><div class="spinner" style="margin:0 auto 14px"></div><h3>知芽正在想一个简短的回答</h3><p>回答会结合当前页面的内容。</p></div></div>`;
+        } else if (state.voice.stage === "answer") {
+          body = `<div class="transcript-box"><label>孩子的问题<span>已确认</span></label><p style="margin:9px 0 0;font-size:14px;line-height:23px">“${escapeHtml(state.voice.question)}”</p></div><div class="answer-card"><strong>芽 · 知芽的回答</strong><p>${escapeHtml(state.voice.answer)}</p></div><div class="tts-row"><button type="button" data-action="tts">${state.voice.playback === "playing" ? "Ⅱ" : "▶"}</button><div><strong>朗读回答</strong><small>${state.voice.playback === "error" ? "播放失败，文字仍可阅读" : state.voice.playback === "playing" ? "正在播放" : "点击播放"}</small></div></div><div class="modal-actions"><button class="secondary" type="button" data-action="new-question">再问一个</button><button class="primary" type="button" data-action="close-voice">回到绘本</button></div>`;
+        }
+        return `<div class="modal-backdrop" data-action="voice-backdrop"><section class="modal-card voice-card" role="dialog" aria-modal="true" aria-labelledby="voice-title" data-action="stop-modal"><div class="modal-head"><div><h2 id="voice-title">问知芽</h2><p>${escapeHtml(currentBook().title)} · 第 ${page.no} 页</p></div><button class="modal-close" type="button" data-action="close-voice" aria-label="关闭">×</button></div>${voiceProgress(state.voice.stage)}${body}<p class="modal-note">回答只针对当前页；语音识别失败时可改用文字，不影响继续阅读。</p></section></div>`;
+      }
+
+      function accountSidebar() {
+        const items = [
+          ["overview", "个人中心首页", "⌂"],
+          ["profile", "个人资料", "☺"],
+          ["children", "儿童档案", "♧"],
+          ["shelf", "我的书架", "▤"],
+          ["growth", "成长记录", "⌁"],
+          ["plan", "阅读计划", "▦"]
+        ];
+        return `<aside class="account-sidebar">
+          <div class="account-person"><div class="account-avatar">沐</div><div><strong>${escapeHtml(state.profile.nickname)}</strong><small>亲子阅读空间</small></div></div>
+          <button class="pill child-switch" type="button" data-action="go" data-view="account" data-section="children"><span>${escapeHtml(currentChild().name)} · ${currentChild().age} 岁</span><span>⌄</span></button>
+          <nav class="account-nav" aria-label="个人中心功能">
+            ${items.map(([key, label, glyph]) => `<button class="account-nav-button ${state.account.section === key ? "active" : ""}" type="button" data-action="account-section" data-section="${key}"><span class="account-nav-icon">${glyph}</span>${label}</button>`).join("")}
+          </nav>
+          <div class="account-side-note">今天也读一点。<br>每天 15 分钟，和孩子一起慢慢长大。</div>
+        </aside>`;
+      }
+
+      function accountStats() {
+        const childHistory = state.history.filter((item) => item.childId === currentChild().id);
+        const readCount = new Set(childHistory.map((item) => item.bookId)).size;
+        const minutes = childHistory.reduce((total, item) => total + item.minutes, 0);
+        const favorites = state.favorites.length;
+        return { childHistory, readCount, minutes, favorites };
+      }
+
+      function accountOverview() {
+        const { childHistory, readCount, minutes, favorites } = accountStats();
+        const recent = childHistory.slice(0, 3);
+        const achievements = [
+          ["11 月 17 日", `完成了《${bookById(childHistory[0]?.bookId || "guess").title}》的亲子共读`, `${childHistory[0]?.minutes || 0} 分钟 · ${childHistory[0]?.interactions || 0} 次互动`],
+          ["11 月 16 日", "连续阅读保持中", "每次共读都会留下新的阅读足迹"],
+          ["11 月 14 日", "孩子主动提出了故事问题", "语音问答 · 当前页内容"]
+        ];
+        return `
+          <div class="account-title"><div><h1>个人中心</h1><p>欢迎回来，今天也来陪${escapeHtml(currentChild().name)}读一个好故事吧！</p></div><button class="primary" type="button" data-action="go" data-view="library">去选一本绘本</button></div>
+          <section class="account-hero">
+            <div class="account-hero-copy"><p class="eyebrow">今天也来陪孩子读一点</p><h1>${escapeHtml(currentChild().name)}的阅读空间</h1><p>${currentChild().interests.join(" · ")} · 以孩子喜欢的故事为起点</p><div class="account-hero-actions"><button class="secondary" type="button" data-action="account-section" data-section="children">切换孩子</button><button class="secondary" type="button" data-action="account-section" data-section="plan">查看阅读计划</button></div></div>
+            <div class="hero-illustration"><img src="${assets.rabbitScene}" alt=""></div>
+          </section>
+          <div class="stats-grid">
+            ${statCard("收藏绘本", favorites, "本")}
+            ${statCard("已读绘本", readCount, "本")}
+            ${statCard("累计阅读", minutes, "分钟")}
+            ${statCard("连续阅读", 7, "天")}
+          </div>
+          <div class="account-grid">
+            <section class="account-card"><div class="account-card-head"><div><h2>最近阅读</h2><p>继续上次停下的故事</p></div><button class="text-button" type="button" data-action="account-section" data-section="growth">查看全部 →</button></div>
+              <div class="recent-list">${recent.length ? recent.map((item) => recentBook(item)).join("") : `<div class="empty-state"><div><p>还没有阅读记录。</p><button class="primary" type="button" data-action="go" data-view="library">去选一本绘本</button></div></div>`}</div>
+            </section>
+            <section class="account-card"><div class="account-card-head"><div><h2>今日阅读计划</h2><p>保留一点点亲子时间</p></div></div><div class="plan-metric"><strong>${state.plan.books}</strong><span>本绘本 · ${state.plan.minutes} 分钟</span></div><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, childHistory.filter((item) => isToday(item.date)).length / state.plan.books * 100)}%"></div></div><p class="plan-note">${childHistory.filter((item) => isToday(item.date)).length ? "今天已经完成一次共读。" : "今天还没有开始，选一本孩子喜欢的故事吧。"}</p><button class="secondary" type="button" data-action="account-section" data-section="plan" style="width:100%;margin-top:14px">查看计划</button></section>
+          </div>
+          <section class="account-card" style="margin-top:16px"><div class="account-card-head"><div><h2>近期成长记录</h2><p>每一次共读，都算数</p></div><button class="text-button" type="button" data-action="account-section" data-section="growth">查看成长记录 →</button></div><div class="activity-list">${achievements.map(([date, title, detail]) => `<div class="activity-row"><time>${date}</time><div><strong>${title}</strong><small>${detail}</small></div></div>`).join("")}</div></section>`;
+      }
+
+      function statCard(label, value, unit) {
+        return `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small>${unit} · 当前孩子数据</small></article>`;
+      }
+
+      function recentBook(item) {
+        const book = bookById(item.bookId);
+        return `<button class="recent-book" type="button" data-action="open-detail" data-id="${book.id}"><span class="recent-cover">${coverImage(book)}</span><span><strong>${escapeHtml(book.title)}</strong><small>${formatDate(item.date)} · 阅读 ${item.minutes} 分钟</small></span></button>`;
+      }
+
+      function accountProfile() {
+        return `<div class="account-title"><div><h1>个人资料</h1><p>管理你的账号信息，不混入孩子的资料。</p></div></div><div class="profile-grid"><section class="account-card profile-card-large"><div class="profile-avatar">沐</div><h2>${escapeHtml(state.profile.nickname)}</h2><p>${escapeHtml(state.profile.account)}</p><span class="pill">家长账号</span><button class="secondary" type="button" data-action="profile-feedback" style="width:100%;margin-top:20px">更换头像</button></section><form class="account-card form-card" id="profile-form"><h2>基本信息</h2><div class="form-field"><label for="nickname">昵称</label><input id="nickname" name="nickname" value="${escapeHtml(state.profile.nickname)}"></div><div class="form-field"><label for="account">登录账号</label><input id="account" name="account" value="${escapeHtml(state.profile.account)}" disabled></div><div class="form-field"><label for="signature">个性签名</label><textarea id="signature" name="signature">${escapeHtml(state.profile.signature)}</textarea></div><button class="primary" type="submit">保存修改</button></form></div><section class="account-card security-card"><div class="account-card-head"><div><h2>账户安全</h2><p>密码和登录状态由账号系统管理，不用于推荐或阅读记录。</p></div></div><div class="security-row"><div><strong>修改密码</strong><small>建议定期更新账号密码</small></div><button class="secondary" type="button" data-action="profile-feedback">去修改</button></div><div class="security-row"><div><strong>退出登录</strong><small>退出当前设备上的账号</small></div><button class="secondary" type="button" data-action="logout">退出</button></div></section>`;
+      }
+
+      function accountChildren() {
+        return `<div class="account-title"><div><h1>我的宝贝</h1><p>记录孩子的成长，让每一次阅读都更有意义。</p></div><button class="primary" type="button" data-action="add-child">+ 添加孩子</button></div><div class="child-grid">${state.children.map(childCard).join("")}<button class="add-child-card" type="button" data-action="add-child"><div><strong>+ 添加孩子</strong><span>为每个孩子保留独立的阅读偏好</span></div></button></div>`;
+      }
+
+      function childCard(child) {
+        const active = child.id === state.account.childId;
+        return `<article class="child-card ${active ? "current" : ""}"><div class="child-head"><div class="child-avatar" style="background:${child.color}">${escapeHtml(child.name.slice(0, 1))}</div><div><h2>${escapeHtml(child.name)}</h2><span class="pill">${child.age} 岁</span><p class="child-detail">出生日期：${escapeHtml(child.birthday)} · ${escapeHtml(child.gender || "未填写")}</p></div></div><div class="tag-list">${child.interests.map((tag) => `<span class="pill warm">${escapeHtml(tag)}</span>`).join("")}</div><div class="child-actions"><button class="secondary" type="button" data-action="select-child" data-id="${child.id}">${active ? "当前孩子" : "切换此孩子"}</button><button class="secondary" type="button" data-action="edit-child" data-id="${child.id}">编辑档案</button><button class="text-button" type="button" data-action="delete-child" data-id="${child.id}">删除</button></div></article>`;
+      }
+
+      function accountShelf() {
+        const filter = state.account.shelfFilter;
+        let list = books.filter((book) => state.favorites.includes(book.id));
+        if (filter === "待读") list = list.filter((book) => !state.history.some((item) => item.bookId === book.id && item.childId === currentChild().id));
+        if (filter === "已读") list = list.filter((book) => state.history.some((item) => item.bookId === book.id && item.childId === currentChild().id));
+        return `<div class="account-title"><div><h1>我的绘本小书架</h1><p>收藏喜欢的故事，随时开启亲子阅读。</p></div></div><div class="stats-grid"><article class="stat-card"><span>收藏绘本</span><strong>${state.favorites.length}</strong><small>本</small></article><article class="stat-card"><span>已读绘本</span><strong>${new Set(state.history.filter((item) => item.childId === currentChild().id).map((item) => item.bookId)).size}</strong><small>本</small></article><article class="stat-card"><span>待读绘本</span><strong>${Math.max(0, state.favorites.length - new Set(state.history.filter((item) => item.childId === currentChild().id).map((item) => item.bookId)).size)}</strong><small>本</small></article></div><div class="shelf-toolbar"><div class="shelf-filters">${["全部", "待读", "已读"].map((value) => `<button class="filter-chip ${filter === value ? "active" : ""}" type="button" data-action="shelf-filter" data-value="${value}">${value === "全部" ? "全部收藏" : value}</button>`).join("")}</div><span class="address">按最近收藏排序</span></div>${list.length ? `<div class="shelf-grid">${list.map((book) => shelfCard(book)).join("")}</div>` : `<div class="empty-state"><div><p class="eyebrow">书架还是空的</p><h2>去发现一本喜欢的绘本吧</h2><p>收藏的绘本会出现在这里，已读状态会与成长记录同步。</p><button class="primary" type="button" data-action="go" data-view="library">去逛逛绘本馆</button></div></div>`}`;
+      }
+
+      function shelfCard(book) {
+        const read = state.history.some((item) => item.bookId === book.id && item.childId === currentChild().id);
+        return `<article class="shelf-card ${state.selectedBookId === book.id ? "selected" : ""}"><button class="shelf-card-cover" type="button" data-action="open-detail" data-id="${book.id}">${coverImage(book)}</button><h3>${escapeHtml(book.title)}</h3><p>${book.age} · ${book.pages} 页</p><div class="card-row"><span class="pill ${read ? "" : "warm"}">${read ? "已读" : "未读"}</span><button class="heart-button ${state.favorites.includes(book.id) ? "active" : ""}" type="button" data-action="toggle-favorite" data-id="${book.id}" aria-label="取消收藏"><img src="${assets.heart}" alt=""></button><button class="text-button" type="button" data-action="open-detail" data-id="${book.id}">查看详情</button></div></article>`;
+      }
+
+      function accountGrowth() {
+        const records = state.history.filter((item) => item.childId === currentChild().id);
+        const readCount = new Set(records.map((item) => item.bookId)).size;
+        const minutes = records.reduce((total, item) => total + item.minutes, 0);
+        const days = new Set(records.map((item) => item.date.slice(0, 10))).size;
+        const chart = [2, 4, 3, 5, 2, 6, 4];
+        return `<div class="account-title"><div><h1>成长足迹</h1><p>每一本读过的绘本，都是成长的小小印记。</p></div></div><div class="stats-grid"><article class="stat-card"><span>累计阅读绘本</span><strong>${readCount}</strong><small>本</small></article><article class="stat-card"><span>累计阅读时长</span><strong>${minutes}</strong><small>分钟</small></article><article class="stat-card"><span>本月阅读天数</span><strong>${days}</strong><small>天</small></article><article class="stat-card"><span>连续阅读</span><strong>7</strong><small>天</small></article></div><div class="account-grid"><section class="account-card chart-card"><div class="account-card-head"><div><h2>阅读趋势</h2><p>最近一周阅读次数</p></div><div class="shelf-filters"><button class="filter-chip active" type="button">按周</button><button class="filter-chip" type="button" data-action="show-filter-feedback">按月</button></div></div><div class="chart-bars">${chart.map((value, index) => `<div class="chart-column"><i style="height:${value * 22}px"></i><span>${["一", "二", "三", "四", "五", "六", "日"][index]}</span></div>`).join("")}</div></section><section class="account-card"><div class="account-card-head"><div><h2>本月阅读小结</h2><p>根据当前孩子的阅读记录生成</p></div></div><div class="insight-list"><div class="insight-row"><span>本月读过</span><strong>${readCount} 本绘本</strong></div><div class="insight-row"><span>最喜欢主题</span><strong>${currentChild().interests[0] || "自然"}</strong></div><div class="insight-row"><span>阅读习惯</span><strong>${days ? "睡前共读较稳定" : "还没有记录"}</strong></div><div class="insight-row"><span>共读建议</span><strong>请孩子先描述画面</strong></div></div></section></div><section class="account-card" style="margin-top:16px"><div class="account-card-head"><div><h2>阅读历史</h2><p>记录与当前孩子关联的阅读过程</p></div><button class="text-button" type="button" data-action="show-filter-feedback">最近一个月 ⌄</button></div>${records.length ? `<div class="timeline">${records.map((item) => { const book = bookById(item.bookId); return `<div class="timeline-row"><time>${formatDate(item.date)}</time><div><strong>${escapeHtml(book.title)}</strong><small>阅读 ${item.minutes} 分钟 · ${item.interactions} 次互动</small></div><span class="pill">已读</span></div>`; }).join("")}</div>` : `<div class="empty-state"><div><h2>还没有阅读记录</h2><p>完成一次亲子共读后，阅读摘要会显示在这里。</p><button class="primary" type="button" data-action="go" data-view="library">去选一本绘本</button></div></div>`}</section>`;
+      }
+
+      function accountPlan() {
+        const records = state.history.filter((item) => item.childId === currentChild().id);
+        const calendar = buildCalendar(records);
+        const completedDays = new Set(records.map((item) => item.date.slice(0, 10))).size;
+        return `<div class="account-title"><div><h1>阅读计划</h1><p>把每天的共读变成轻松、可持续的小习惯。</p></div><button class="primary" type="button" data-action="open-plan-editor">设置计划</button></div><div class="plan-layout"><section class="today-plan-card"><p class="eyebrow">✦ 今日阅读计划</p><h2>今天读 ${state.plan.books} 本绘本</h2><p class="address">目标时长 ${state.plan.minutes} 分钟 · 每周 ${state.plan.weekly} 天</p><div class="progress-track" style="margin-top:18px"><div class="progress-fill" style="width:${Math.min(100, (records.filter((item) => isToday(item.date)).length / state.plan.books) * 100)}%"></div></div><div class="plan-recommend"><img src="${books[4].cover}" alt=""><div><strong>${books[4].title}</strong><small>今天可以从这本书开始</small></div></div><button class="primary" type="button" data-action="start-reading" data-id="${books[4].id}" style="width:100%;margin-top:16px">开始阅读</button><p class="plan-note">计划完成情况按当前孩子的本地阅读记录计算。</p></section><section class="account-card calendar-card"><div class="calendar-head"><h2>2026 年 11 月</h2><div class="calendar-nav"><button class="round-button" type="button" data-action="show-calendar-feedback">‹</button><button class="round-button" type="button" data-action="show-calendar-feedback">›</button></div></div><div class="calendar-grid"><span class="calendar-weekday">一</span><span class="calendar-weekday">二</span><span class="calendar-weekday">三</span><span class="calendar-weekday">四</span><span class="calendar-weekday">五</span><span class="calendar-weekday">六</span><span class="calendar-weekday">日</span>${calendar.map((day) => day ? `<button class="calendar-day ${records.some((item) => item.date.slice(0, 10) === day.key) ? "done" : ""}" type="button" data-action="calendar-day" data-date="${day.key}">${day.number}</button>` : `<span class="calendar-day empty"></span>`).join("")}</div></section></div><section class="account-card plan-settings-card"><div class="account-card-head"><div><h2>计划设置</h2><p>目标可以随孩子的节奏调整。</p></div><button class="secondary" type="button" data-action="open-plan-editor">编辑计划</button></div><div class="plan-setting-row"><span>每日阅读绘本</span><strong>${state.plan.books} 本</strong></div><div class="plan-setting-row"><span>每日阅读时长</span><strong>${state.plan.minutes} 分钟</strong></div><div class="plan-setting-row"><span>每周阅读目标</span><strong>${state.plan.weekly} 天</strong></div><div class="completion-grid"><div><span>本周完成</span><strong>${Math.min(state.plan.weekly, completedDays)} 次</strong></div><div><span>本月完成</span><strong>${completedDays} 天</strong></div><div><span>目标完成率</span><strong>${state.plan.weekly ? Math.min(100, Math.round(completedDays / state.plan.weekly * 100)) : 0}%</strong></div></div></section>`;
+      }
+
+      function buildCalendar(records) {
+        const year = 2026;
+        const month = 10;
+        const firstDay = new Date(year, month, 1);
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const offset = (firstDay.getDay() + 6) % 7;
+        const cells = Array.from({ length: offset }, () => null);
+        for (let day = 1; day <= daysInMonth; day += 1) {
+          const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          cells.push({ number: day, key });
+        }
+        return cells;
+      }
+
+      function accountPage() {
+        const sections = {
+          overview: accountOverview,
+          profile: accountProfile,
+          children: accountChildren,
+          shelf: accountShelf,
+          growth: accountGrowth,
+          plan: accountPlan
+        };
+        return `${header("account")}<main class="page"><div class="page-width account-layout">${accountSidebar()}<section class="account-main">${(sections[state.account.section] || accountOverview)()}</section></div></main>${state.account.childEditor !== null ? childEditorModal() : ""}${state.account.deleteId ? deleteModal() : ""}${state.account.planEditor ? planEditorModal() : ""}`;
+      }
+
+      function childEditorModal() {
+        const draft = state.account.childEditor;
+        const isNew = !draft.id;
+        return `<div class="modal-backdrop" data-action="stop-modal"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="child-editor-title"><div class="modal-head"><div><h2 id="child-editor-title">${isNew ? "添加孩子" : "编辑儿童档案"}</h2><p>这些信息只用于推荐和阅读计划。</p></div><button class="modal-close" type="button" data-action="close-child-editor" aria-label="关闭">×</button></div><form id="child-form"><div class="form-field"><label for="child-name">昵称</label><input id="child-name" name="name" value="${escapeHtml(draft.name || "")}" required></div><div class="form-field"><label for="child-birthday">出生日期</label><input id="child-birthday" name="birthday" type="date" value="${escapeHtml(draft.birthday || "2022-03-18")}"></div><div class="form-field"><label for="child-gender">性别（可选）</label><select id="child-gender" name="gender"><option value="">未填写</option><option value="女" ${draft.gender === "女" ? "selected" : ""}>女</option><option value="男" ${draft.gender === "男" ? "selected" : ""}>男</option></select></div><div class="form-field"><label>兴趣偏好</label><div class="interest-picker">${["动物", "自然", "冒险", "童话", "友谊"].map((tag) => `<button class="interest-option ${draft.interests.includes(tag) ? "selected" : ""}" type="button" data-action="toggle-child-interest" data-value="${tag}">${tag}</button>`).join("")}</div></div><div class="modal-actions"><button class="secondary" type="button" data-action="close-child-editor">取消</button><button class="primary" type="submit">保存档案</button></div></form></section></div>`;
+      }
+
+      function deleteModal() {
+        const child = state.children.find((item) => item.id === state.account.deleteId);
+        return `<div class="modal-backdrop" data-action="stop-modal"><section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="delete-title"><div class="modal-head"><div class="warning-icon">!</div><div><h2 id="delete-title">确认删除${escapeHtml(child?.name || "孩子")}的档案？</h2><p>删除后，这个孩子的书架、阅读记录和计划将不再关联，此操作无法恢复。</p></div></div><div class="modal-actions"><button class="secondary" type="button" data-action="close-delete">保留档案</button><button class="danger" type="button" data-action="confirm-delete" data-id="${state.account.deleteId}">确认删除</button></div></section></div>`;
+      }
+
+      function planEditorModal() {
+        const draft = state.planDraft || state.plan;
+        return `<div class="modal-backdrop" data-action="stop-modal"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="plan-editor-title"><div class="modal-head"><div><h2 id="plan-editor-title">设置阅读计划</h2><p>计划会随当前孩子同步更新。</p></div><button class="modal-close" type="button" data-action="close-plan-editor" aria-label="关闭">×</button></div><form id="plan-form"><div class="form-field"><label for="plan-books">每日阅读绘本数量</label><input id="plan-books" name="books" type="number" min="1" max="5" value="${draft.books}"></div><div class="form-field"><label for="plan-minutes">每日阅读时长（分钟）</label><input id="plan-minutes" name="minutes" type="number" min="5" max="60" step="5" value="${draft.minutes}"></div><div class="form-field"><label for="plan-weekly">每周阅读目标（天）</label><input id="plan-weekly" name="weekly" type="number" min="1" max="7" value="${draft.weekly}"></div><div class="modal-actions"><button class="secondary" type="button" data-action="close-plan-editor">取消</button><button class="primary" type="submit">保存计划</button></div></form></section></div>`;
+      }
+
+      function formatDate(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "刚刚";
+        return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+      }
+
+      function carouselOffset(index, selectedIndex, count) {
+        let offset = index - selectedIndex;
+        if (offset > count / 2) offset -= count;
+        if (offset < -count / 2) offset += count;
+        return offset;
+      }
+
+      function carouselSpec(offset, baseWidth, panelWidth) {
+        const distance = Math.abs(offset);
+        const direction = Math.sign(offset);
+        if (distance === 0) {
+          return {
+            x: 0,
+            y: baseWidth * .03,
+            z: 55,
+            scale: 1.08,
+            rotateY: 0,
+            opacity: 1,
+            layer: 90,
+            filter: "saturate(1) brightness(1)"
+          };
+        }
+        if (distance === 1) {
+          return {
+            x: direction * panelWidth * .22,
+            y: baseWidth * .09,
+            z: 10,
+            scale: .68,
+            rotateY: -direction * 15,
+            opacity: .7,
+            layer: 60,
+            filter: "saturate(.82) brightness(.98)"
+          };
+        }
+        if (distance === 2) {
+          return {
+            x: direction * panelWidth * .38,
+            y: baseWidth * .18,
+            z: -40,
+            scale: .46,
+            rotateY: -direction * 25,
+            opacity: .28,
+            layer: 30,
+            filter: "saturate(.68) brightness(.92)"
+          };
+        }
+        return {
+          x: direction * panelWidth * .48,
+          y: baseWidth * .24,
+          z: -80,
+          scale: .4,
+          rotateY: -direction * 30,
+          opacity: 0,
+          layer: 10,
+          filter: "saturate(.62) brightness(.9)"
+        };
+      }
+
+      function carouselTransform(spec) {
+        return `translate(-50%, -50%) translate3d(${spec.x}px, ${spec.y}px, ${spec.z}px) rotateY(${spec.rotateY}deg) scale(${spec.scale})`;
+      }
+
+      function applyCarouselCard(card, spec, offset) {
+        const hidden = Math.abs(offset) > 2;
+        card.style.setProperty("--wheel-x", `${spec.x}px`);
+        card.style.setProperty("--wheel-y", `${spec.y}px`);
+        card.style.setProperty("--wheel-z", `${spec.z}px`);
+        card.style.setProperty("--wheel-scale", String(spec.scale));
+        card.style.setProperty("--wheel-rotate-y", `${spec.rotateY}deg`);
+        card.style.setProperty("--wheel-opacity", String(spec.opacity));
+        card.style.setProperty("--wheel-layer", String(spec.layer));
+        card.style.setProperty("--wheel-filter", spec.filter);
+        card.classList.toggle("is-center", offset === 0);
+        card.classList.toggle("is-side", Math.abs(offset) === 1 || Math.abs(offset) === 2);
+        card.classList.toggle("is-hidden", hidden);
+        card.tabIndex = hidden ? -1 : 0;
+        card.setAttribute("aria-hidden", hidden ? "true" : "false");
+        card.style.pointerEvents = hidden ? "none" : "auto";
+      }
+
+      function layoutLibraryWheel() {
+        const wheel = document.querySelector(".book-wheel");
+        if (!wheel) return;
+        const cards = [...wheel.querySelectorAll(".wheel-book")];
+        if (!cards.length) return;
+        const selectedIndex = cards.findIndex((card) => card.classList.contains("selected"));
+        if (selectedIndex < 0) return;
+        const baseWidth = cards[0].offsetWidth;
+        const panelWidth = wheel.offsetWidth;
+        cards.forEach((card, index) => {
+          const offset = carouselOffset(index, selectedIndex, cards.length);
+          applyCarouselCard(card, carouselSpec(offset, baseWidth, panelWidth), offset);
+        });
+      }
+
+      function animateLibraryWheel(fromBookId) {
+        const wheel = document.querySelector(".book-wheel");
+        if (!wheel || !fromBookId) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        const cards = [...wheel.querySelectorAll(".wheel-book")];
+        const selectedIndex = cards.findIndex((card) => card.classList.contains("selected"));
+        const previousIndex = cards.findIndex((card) => card.dataset.id === fromBookId);
+        if (selectedIndex < 0 || previousIndex < 0) return;
+        const baseWidth = cards[0].offsetWidth;
+        const panelWidth = wheel.offsetWidth;
+        cards.forEach((card, index) => {
+          const fromOffset = carouselOffset(index, previousIndex, cards.length);
+          const toOffset = carouselOffset(index, selectedIndex, cards.length);
+          const from = carouselSpec(fromOffset, baseWidth, panelWidth);
+          const to = carouselSpec(toOffset, baseWidth, panelWidth);
+          card.animate(
+            [
+              {
+                transform: carouselTransform(from),
+                opacity: String(from.opacity),
+                filter: from.filter
+              },
+              {
+                transform: carouselTransform(to),
+                opacity: String(to.opacity),
+                filter: to.filter
+              }
+            ],
+            { duration: 680, easing: "cubic-bezier(.22, .72, .2, 1)" }
+          );
+        });
+      }
+
+      function isToday(value) {
+        const date = new Date(value);
+        const now = new Date();
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+      }
+
+      function updateReaderPageUI(index) {
+        const book = currentBook();
+        const storyPages = pagesFor(book);
+        const nextIndex = Math.max(0, Math.min(storyPages.length - 1, index));
+        const page = storyPages[nextIndex];
+        state.reader.pageIndex = nextIndex;
+        const progress = document.querySelector("[data-reader-progress]");
+        if (progress) progress.textContent = `第 ${page.no} / ${book.pages} 页 · 与孩子一起慢慢读`;
+        const question = document.querySelector("[data-reader-question]");
+        if (question) question.textContent = page.question;
+        const tip = document.querySelector("[data-reader-tip]");
+        if (tip) tip.textContent = page.answer;
+        const audioSlot = document.querySelector("[data-reader-audio-slot]");
+        if (audioSlot) audioSlot.innerHTML = readerAudioNotice(page);
+        const feedbackSlot = document.querySelector("[data-reader-feedback-slot]");
+        if (feedbackSlot) feedbackSlot.innerHTML = readerFeedbackNotice();
+        const previous = document.querySelector("[data-reader-prev]");
+        if (previous) previous.disabled = nextIndex === 0;
+        const next = document.querySelector("[data-reader-next]");
+        if (next) {
+          const isLast = nextIndex >= storyPages.length - 1;
+          next.dataset.action = isLast ? "finish-reading" : "next-page";
+          next.innerHTML = `<span class="dock-glyph">${isLast ? "✓" : "›"}</span>${isLast ? "完成" : "下一页"}`;
+        }
+        try {
+          history.replaceState(null, "", `${location.pathname}${location.search}#reader/${book.id}/${nextIndex + 1}`);
+        } catch {}
+      }
+
+      function mountReaderFlip() {
+        if (state.view !== "reader" || state.reader.loading || !window.OpenPageFlip) return;
+        const container = document.getElementById("zhiya-flipbook");
+        if (!container) return;
+        const book = currentBook();
+        const storyPages = pagesFor(book);
+        const startPage = Math.max(0, Math.min(storyPages.length - 1, state.reader.pageIndex)) * 2;
+        try {
+          activeReaderFlip = window.OpenPageFlip.createBook(container, {
+            width: 420,
+            height: 560,
+            size: "stretch",
+            minWidth: 240,
+            maxWidth: 460,
+            layout: "auto",
+            cover: false,
+            startPage,
+            flipDuration: 920,
+            easing: (progress) => 1 - ((1 - progress) ** 3),
+            shadows: true,
+            shadowOpacity: .3,
+            drag: true,
+            swipe: true,
+            hover: true,
+            click: "edges"
+          });
+          activeReaderFlip.on("flip", ({ page }) => {
+            const storyIndex = Math.max(0, Math.min(storyPages.length - 1, Math.floor(page / 2)));
+            if (storyIndex === state.reader.pageIndex) return;
+            stopSpeech();
+            state.reader.audio = "idle";
+            state.reader.feedback = "";
+            updateReaderPageUI(storyIndex);
+          });
+          activeReaderFlip.on("changeOrientation", () => {
+            requestAnimationFrame(() => activeReaderFlip?.redraw());
+          });
+        } catch (error) {
+          activeReaderFlip = null;
+          console.error("OpenPageFlip failed to initialise", error);
+        }
+      }
+
+      function render() {
+        if (activeReaderFlip) {
+          activeReaderFlip.destroy();
+          activeReaderFlip = null;
+        }
+        document.body.dataset.view = state.view;
+        const views = { home: homePage, library: libraryPage, detail: detailPage, reader: readerPage, account: accountPage };
+        app.innerHTML = (views[state.view] || homePage)();
+        window.__zhiyaImageError = () => { state.readerImageError = true; render(); };
+        if (state.view === "library") {
+          requestAnimationFrame(() => {
+            layoutLibraryWheel();
+            if (state.libraryMotionFrom !== null) {
+              animateLibraryWheel(state.libraryMotionFrom);
+              state.libraryMotionFrom = null;
+            }
+          });
+        }
+        if (state.voice.open) {
+          requestAnimationFrame(() => document.getElementById("voice-input")?.focus());
+        }
+        if (state.view === "reader" && !state.reader.loading) {
+          requestAnimationFrame(mountReaderFlip);
+        }
+      }
+
+      function switchChild(id) {
+        if (!state.children.some((child) => child.id === id)) return;
+        state.account.childId = id;
+        save();
+        render();
+        showToast(`已切换到${currentChild().name}的阅读空间`);
+      }
+
+      function openDetail(id) {
+        state.selectedBookId = id;
+        setView("detail", { hash: `detail/${id}` });
+      }
+
+      function startReading(id = state.selectedBookId) {
+        state.selectedBookId = id;
+        state.reader.pageIndex = 0;
+        state.reader.feedback = "";
+        state.reader.completed = false;
+        state.readerImageError = false;
+        setView("reader", { bookId: id, hash: `reader/${id}/1` });
+      }
+
+      function cycleWheel(direction) {
+        const list = filteredBooks();
+        if (!list.length) return;
+        const currentId = state.selectedBookId;
+        const index = Math.max(0, list.findIndex((book) => book.id === currentId));
+        const nextBook = list[(index + direction + list.length) % list.length];
+        if (!nextBook || nextBook.id === currentId) return;
+        state.libraryMotionFrom = currentId;
+        state.selectedBookId = nextBook.id;
+        render();
+      }
+
+      function answerForCurrentPage(question) {
+        const page = pagesFor(currentBook())[state.reader.pageIndex] || pagesFor(currentBook())[0];
+        const text = question.trim();
+        if (/妈妈|为什么|离开|跑/.test(text)) return page.answer;
+        return `${page.answer} 你也可以再问一个和画面有关的问题。`;
+      }
+
+      function stopSpeech() {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      }
+
+      function narration() {
+        if (state.reader.audio === "playing") {
+          stopSpeech();
+          state.reader.audio = "paused";
+          render();
+          return;
+        }
+        if (!("speechSynthesis" in window)) {
+          state.reader.audio = "error";
+          render();
+          showToast("当前浏览器不支持语音播放，文字仍可阅读");
+          return;
+        }
+        stopSpeech();
+        const utterance = new SpeechSynthesisUtterance(pagesFor(currentBook())[state.reader.pageIndex].text);
+        utterance.lang = "zh-CN";
+        utterance.rate = .92;
+        utterance.onend = () => { state.reader.audio = "idle"; if (state.view === "reader") render(); };
+        utterance.onerror = () => { state.reader.audio = "error"; if (state.view === "reader") render(); };
+        state.reader.audio = "playing";
+        window.speechSynthesis.speak(utterance);
+        render();
+      }
+
+      function beginVoice() {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Recognition) {
+          state.voice.stage = "failure";
+          state.voice.error = "浏览器没有提供语音识别能力，可以改用文字输入。";
+          render();
+          return;
+        }
+        try {
+          const recognition = new Recognition();
+          recognition.lang = "zh-CN";
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+          recognition.onresult = (event) => {
+            state.voice.transcript = event.results[0][0].transcript || "";
+            state.voice.stage = "confirm";
+            render();
+          };
+          recognition.onerror = () => {
+            state.voice.stage = "failure";
+            state.voice.error = "没有听清这句话，可以重试或直接输入文字。";
+            render();
+          };
+          recognition.onend = () => {
+            if (state.voice.stage === "recording") {
+              state.voice.stage = "failure";
+              state.voice.error = "录音结束但没有识别到内容。";
+              render();
+            }
+          };
+          state.voice.recognition = recognition;
+          state.voice.stage = "recording";
+          recognition.start();
+          render();
+        } catch {
+          state.voice.stage = "failure";
+          state.voice.error = "麦克风暂时不可用，可以改用文字输入。";
+          render();
+        }
+      }
+
+      function stopVoice() {
+        try { state.voice.recognition?.stop(); } catch {}
+        if (state.voice.stage === "recording") {
+          state.voice.stage = "processing";
+          render();
+          setTimeout(() => {
+            if (state.voice.stage === "processing") {
+              state.voice.stage = "confirm";
+              state.voice.transcript = state.voice.transcript || "为什么故事里的人物会这样选择？";
+              render();
+            }
+          }, 650);
+        }
+      }
+
+      function confirmVoice(question) {
+        const text = question.trim();
+        if (!text) { showToast("请先写下或说出一个问题"); return; }
+        state.voice.question = text;
+        state.voice.transcript = text;
+        state.voice.stage = "answering";
+        render();
+        setTimeout(() => {
+          state.voice.answer = answerForCurrentPage(text);
+          state.voice.stage = "answer";
+          state.voice.playback = "idle";
+          recordReadingInteraction();
+          render();
+        }, 650);
+      }
+
+      function recordReadingInteraction() {
+        const book = currentBook();
+        const childId = state.account.childId;
+        const today = new Date().toISOString();
+        const existing = state.history.find((item) => item.childId === childId && item.bookId === book.id && isToday(item.date));
+        if (existing) {
+          existing.interactions += 1;
+        } else {
+          state.history.unshift({ id: `h-${Date.now()}`, childId, bookId: book.id, date: today, minutes: 1, pages: 1, interactions: 1 });
+        }
+        save();
+      }
+
+      function playAnswer() {
+        if (state.voice.playback === "playing") {
+          stopSpeech();
+          state.voice.playback = "idle";
+          render();
+          return;
+        }
+        if (!("speechSynthesis" in window)) {
+          state.voice.playback = "error";
+          render();
+          return;
+        }
+        stopSpeech();
+        const utterance = new SpeechSynthesisUtterance(state.voice.answer);
+        utterance.lang = "zh-CN";
+        utterance.rate = .94;
+        utterance.onend = () => { state.voice.playback = "idle"; if (state.voice.open) render(); };
+        utterance.onerror = () => { state.voice.playback = "error"; if (state.voice.open) render(); };
+        state.voice.playback = "playing";
+        window.speechSynthesis.speak(utterance);
+        render();
+      }
+
+      function finishReading() {
+        state.reader.completed = true;
+        recordReadingInteraction();
+        render();
+        showToast("这一本读完了，阅读记录已保存");
+      }
+
+      function saveProfile(form) {
+        const data = new FormData(form);
+        state.profile.nickname = String(data.get("nickname") || "").trim() || state.profile.nickname;
+        state.profile.signature = String(data.get("signature") || "").trim();
+        save();
+        render();
+        showToast("个人资料已保存");
+      }
+
+      function saveChild(form) {
+        const data = new FormData(form);
+        const draft = state.account.childEditor;
+        const interests = draft?.interests || [];
+        const child = {
+          id: draft?.id || `child-${Date.now()}`,
+          name: String(data.get("name") || "宝贝").trim(),
+          birthday: String(data.get("birthday") || "2022-01-01"),
+          gender: String(data.get("gender") || ""),
+          interests: interests.length ? interests : ["动物"],
+          color: draft?.color || "#e8d4be"
+        };
+        child.age = Math.max(0, new Date().getFullYear() - Number(child.birthday.slice(0, 4)));
+        const index = state.children.findIndex((item) => item.id === child.id);
+        if (index >= 0) state.children[index] = child; else state.children.push(child);
+        state.account.childId = child.id;
+        state.account.childEditor = null;
+        save();
+        render();
+        showToast("儿童档案已保存");
+      }
+
+      function deleteChild(id) {
+        state.children = state.children.filter((child) => child.id !== id);
+        state.account.deleteId = null;
+        if (!state.children.length) state.children = [childSeeds[0]];
+        state.account.childId = state.children[0].id;
+        save();
+        render();
+        showToast("儿童档案已删除");
+      }
+
+      function savePlan(form) {
+        const data = new FormData(form);
+        state.plan = {
+          books: Math.max(1, Number(data.get("books") || 1)),
+          minutes: Math.max(5, Number(data.get("minutes") || 15)),
+          weekly: Math.max(1, Math.min(7, Number(data.get("weekly") || 5)))
+        };
+        state.account.planEditor = false;
+        save();
+        render();
+        showToast("阅读计划已更新");
+      }
+
+      document.addEventListener("submit", (event) => {
+        if (event.target.id === "search-form") {
+          event.preventDefault();
+          state.librarySearch = document.getElementById("search-input").value.trim();
+          state.libraryReady = true;
+          setView("library", { hash: "library" });
+        }
+        if (event.target.id === "voice-form") {
+          event.preventDefault();
+          confirmVoice(new FormData(event.target).get("question") || "");
+        }
+        if (event.target.id === "profile-form") {
+          event.preventDefault();
+          saveProfile(event.target);
+        }
+        if (event.target.id === "child-form") {
+          event.preventDefault();
+          saveChild(event.target);
+        }
+        if (event.target.id === "plan-form") {
+          event.preventDefault();
+          savePlan(event.target);
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-action]");
+        if (!target) return;
+        const action = target.dataset.action;
+        if (action === "stop-modal") { event.stopPropagation(); return; }
+        if (action === "voice-backdrop") { if (event.target === target) { state.voice.open = false; render(); } return; }
+        if (action === "go") {
+          const view = target.dataset.view;
+          if (view === "account" && target.dataset.section) state.account.section = target.dataset.section;
+          setView(view, { hash: view === "account" ? `account/${state.account.section}` : view });
+          return;
+        }
+        if (action === "open-detail") { openDetail(target.dataset.id); return; }
+        if (action === "start-reading") { startReading(target.dataset.id); return; }
+        if (action === "toggle-favorite") {
+          const id = target.dataset.id;
+          state.favorites = state.favorites.includes(id) ? state.favorites.filter((item) => item !== id) : [...state.favorites, id];
+          save(); render(); showToast(state.favorites.includes(id) ? "已加入书架" : "已取消收藏"); return;
+        }
+        if (action === "select-book") {
+          if (target.dataset.id === state.selectedBookId) return;
+          state.libraryMotionFrom = state.selectedBookId;
+          state.selectedBookId = target.dataset.id;
+          render();
+          return;
+        }
+        if (action === "library-category") {
+          const category = target.dataset.value;
+          state.libraryMotionFrom = state.selectedBookId;
+          if (category === "全部" || state.libraryCategory === category) {
+            state.libraryCategory = "全部";
+            state.libraryOption = null;
+          } else {
+            state.libraryCategory = category;
+            state.libraryOption = null;
+          }
+          render();
+          return;
+        }
+        if (action === "library-option") {
+          state.libraryMotionFrom = state.selectedBookId;
+          state.libraryOption = target.dataset.value === "全部" ? null : target.dataset.value;
+          render();
+          return;
+        }
+        if (action === "clear-library") {
+          state.libraryMotionFrom = state.selectedBookId;
+          state.libraryCategory = "全部";
+          state.libraryOption = null;
+          state.librarySearch = "";
+          render();
+          return;
+        }
+        if (action === "shelf-prev" || action === "shelf-next") {
+          const index = Math.max(0, books.findIndex((bookItem) => bookItem.id === state.selectedBookId));
+          state.shelfMotion = action === "shelf-next" ? "next" : "prev";
+          state.selectedBookId = books[(index + (action === "shelf-next" ? 1 : -1) + books.length) % books.length].id;
+          render();
+          window.setTimeout(() => { state.shelfMotion = null; }, 340);
+          return;
+        }
+        if (action === "wheel-prev") { cycleWheel(-1); return; }
+        if (action === "wheel-next") { cycleWheel(1); return; }
+        if (action === "prev-page" || action === "next-page") {
+          if (activeReaderFlip) {
+            if (action === "prev-page") activeReaderFlip.flipPrev();
+            else activeReaderFlip.flipNext();
+            return;
+          }
+          const book = currentBook();
+          state.reader.pageIndex = Math.max(0, Math.min(book.pages - 1, state.reader.pageIndex + (action === "next-page" ? 1 : -1)));
+          state.reader.feedback = "";
+          render();
+          return;
+        }
+        if (action === "narration") { narration(); return; }
+        if (action === "reader-feedback") { state.reader.feedback = target.dataset.value; render(); return; }
+        if (action === "finish-reading") { finishReading(); return; }
+        if (action === "retry-image") { state.readerImageError = false; render(); return; }
+        if (action === "open-voice") { state.voice = { ...state.voice, open: true, stage: "idle", transcript: "", question: "", answer: "", playback: "idle", error: "" }; render(); return; }
+        if (action === "close-voice") { stopVoice(); stopSpeech(); state.voice.open = false; render(); return; }
+        if (action === "start-voice") { beginVoice(); return; }
+        if (action === "stop-voice") { stopVoice(); return; }
+        if (action === "voice-text") { state.voice.stage = "text"; render(); return; }
+        if (action === "tts") { playAnswer(); return; }
+        if (action === "new-question") { state.voice.stage = "idle"; state.voice.question = ""; state.voice.answer = ""; state.voice.transcript = ""; state.voice.playback = "idle"; render(); return; }
+        if (action === "account-section") { state.account.section = target.dataset.section; setView("account", { hash: `account/${state.account.section}` }); return; }
+        if (action === "profile-feedback") { showToast("当前为原型演示，正式版本会在这里打开对应设置"); return; }
+        if (action === "logout") { state.voice.open = false; setView("home", { hash: "home" }); showToast("已退出当前演示账号"); return; }
+        if (action === "add-child") { state.account.childEditor = { id: "", name: "", birthday: "2022-03-18", gender: "", interests: [], color: "#e8d4be" }; render(); return; }
+        if (action === "edit-child") { const child = state.children.find((item) => item.id === target.dataset.id); state.account.childEditor = { ...child, interests: [...child.interests] }; render(); return; }
+        if (action === "select-child") { switchChild(target.dataset.id); return; }
+        if (action === "delete-child") { state.account.deleteId = target.dataset.id; render(); return; }
+        if (action === "close-child-editor") { state.account.childEditor = null; render(); return; }
+        if (action === "close-delete") { state.account.deleteId = null; render(); return; }
+        if (action === "confirm-delete") { deleteChild(target.dataset.id); return; }
+        if (action === "toggle-child-interest") {
+          const value = target.dataset.value;
+          const draft = state.account.childEditor;
+          draft.interests = draft.interests.includes(value) ? draft.interests.filter((item) => item !== value) : [...draft.interests, value];
+          render();
+          return;
+        }
+        if (action === "shelf-filter") { state.account.shelfFilter = target.dataset.value; render(); return; }
+        if (action === "open-plan-editor") { state.planDraft = { ...state.plan }; state.account.planEditor = true; render(); return; }
+        if (action === "close-plan-editor") { state.account.planEditor = false; state.planDraft = null; render(); return; }
+        if (action === "show-filter-feedback") { showToast("当前原型已切换筛选条件，正式版本会更新趋势数据"); return; }
+        if (action === "show-calendar-feedback") { showToast("当前原型演示月历切换，正式版本会加载对应月份数据"); return; }
+        if (action === "calendar-day") {
+          const date = target.dataset.date;
+          const records = state.history.filter((item) => item.childId === currentChild().id && item.date.slice(0, 10) === date);
+          showToast(records.length ? `当天完成 ${records.length} 次阅读` : "当天暂无阅读记录");
+          return;
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (state.voice.open) { state.voice.open = false; stopSpeech(); render(); return; }
+        if (state.account.childEditor !== null) { state.account.childEditor = null; render(); return; }
+        if (state.account.deleteId) { state.account.deleteId = null; render(); return; }
+        if (state.account.planEditor) { state.account.planEditor = false; render(); }
+      });
+
+      window.addEventListener("hashchange", () => {
+        const nextView = parseHash();
+        setView(nextView, { hash: location.hash.replace(/^#/, "") });
+      });
+
+      window.addEventListener("resize", () => {
+        if (state.view !== "library") return;
+        window.requestAnimationFrame(layoutLibraryWheel);
+      });
+
+      state.view = parseHash();
+      if (state.view === "library") {
+        state.libraryLoading = true;
+        setTimeout(() => { state.libraryLoading = false; state.libraryReady = true; render(); }, 260);
+      } else if (state.view === "reader") {
+        state.reader.loading = true;
+        setTimeout(() => { state.reader.loading = false; render(); }, 180);
+      }
+      render();
+    })();
+  </script>
+</body>
+</html>
