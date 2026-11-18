@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { bookStatusLabel } from '../data/preview'
 
 const props = defineProps({
   books: { type: Array, default: () => [] },
@@ -58,7 +59,7 @@ function chooseShelf(book) {
         </button>
       </div>
       <article v-if="selected" class="home-info-card">
-        <span class="pill">{{ selected.status === 'PREVIEW' ? '设计预览' : '已发布' }} · 亲子共读</span>
+        <span class="pill">{{ bookStatusLabel(selected.status) }} · 亲子共读</span>
         <h2>{{ selected.title }}</h2>
         <p class="author">{{ selected.author }}</p>
         <div class="book-meta">

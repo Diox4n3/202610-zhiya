@@ -20,29 +20,9 @@ const detailBook = computed(() => {
     : state.books.find((book) => book.storyVersionId === state.route.versionId) || state.currentBook
 })
 
-async function handleLogin(account, password) {
-  try {
-    await zhiyaActions.signIn(account, password)
-  } catch (error) {
-    zhiyaActions.setToast(error.message || '登录失败', 'error')
-  }
-}
-
-async function handleRegister(account, password) {
-  try {
-    await zhiyaActions.signUp(account, password)
-  } catch (error) {
-    zhiyaActions.setToast(error.message || '注册失败', 'error')
-  }
-}
-
 async function handleProfileSave({ id, payload }) {
-  try {
-    if (id) await zhiyaActions.editProfile(id, payload)
-    else await zhiyaActions.addProfile(payload)
-  } catch (error) {
-    zhiyaActions.setToast(error.message || '档案保存失败', 'error')
-  }
+  if (id) return zhiyaActions.editProfile(id, payload)
+  return zhiyaActions.addProfile(payload)
 }
 
 async function startBook(book) {
@@ -81,8 +61,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
     <AuthPage
       v-if="state.route.name === 'auth' || (state.route.name === 'account' && !state.auth.authenticated)"
       :health="state.health"
-      @login="handleLogin"
-      @register="handleRegister"
+      :login="zhiyaActions.signIn"
+      :register="zhiyaActions.signUp"
       @back="zhiyaActions.navigate('home')"
     />
     <HomePage
@@ -124,10 +104,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :session="state.currentSession"
       :report="state.currentReport"
       :loading="state.sessionLoading"
-      :authenticated="state.auth.authenticated"
+      :authenticated="state.auth.authenticated && state.auth.status === 'authenticated'"
+      :sync-required="state.readingSyncRequired"
+      :record-page="zhiyaActions.recordPageChange"
+      :complete-reading="zhiyaActions.completeReading"
+      :refresh-reading="zhiyaActions.refreshReading"
       @back="openDetail"
-      @record-page="zhiyaActions.recordPageChange"
-      @complete="zhiyaActions.completeReading"
     />
     <AccountPage
       v-else-if="state.route.name === 'account'"
@@ -141,7 +123,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :loading="state.sessionsLoading"
       @navigate="zhiyaActions.navigate"
       @select-profile="zhiyaActions.selectProfile"
-      @save-profile="handleProfileSave"
+      :save-profile-action="handleProfileSave"
       @sign-out="zhiyaActions.signOut"
       @start="startBook"
     />

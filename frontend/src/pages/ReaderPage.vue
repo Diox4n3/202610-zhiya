@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import FlipBook from '../components/FlipBook.vue'
 import { synthesize, transcribe } from '../api/voice'
+import { describeApiError } from '../api/client'
 
 const props = defineProps({
   book: { type: Object, default: null },
@@ -9,11 +10,16 @@ const props = defineProps({
   report: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   authenticated: { type: Boolean, default: false },
+  syncRequired: { type: Boolean, default: false },
+  recordPage: { type: Function, required: true },
+  completeReading: { type: Function, required: true },
+  refreshReading: { type: Function, required: true },
 })
 
-const emit = defineEmits(['back', 'record-page', 'complete'])
+const emit = defineEmits(['back'])
 const flipBook = ref(null)
-const pageIndex = ref(Math.max(0, (props.session?.currentPage || 1) - 1))
+const pageIndex = ref(0)
+const turnBusy = ref(false)
 const audioStatus = ref('idle')
 const audioMessage = ref('')
 const voiceOpen = ref(false)
@@ -21,74 +27,142 @@ const voiceState = ref('idle')
 const voiceError = ref('')
 const transcript = ref('')
 let recorder = null
-let chunks = []
+let recordingStream = null
+let submitRecording = false
+let voiceGeneration = 0
+let recognitionRequest = null
+let audio = null
+let audioGeneration = 0
+let speechRequest = null
 
 const currentPage = computed(() => props.book?.pages?.[pageIndex.value] || props.book?.pages?.[0] || null)
-const isLast = computed(() => pageIndex.value >= (props.book?.pages?.length || 1) - 1)
+const isLast = computed(() => currentPage.value?.defaultNextPageNumber == null)
+const rereading = computed(() => currentPage.value?.pageNumber !== props.session?.currentPage)
+const mediaAllowed = computed(() => !props.loading && !turnBusy.value && !props.syncRequired && !rereading.value && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
+
+function showPage(pageNumber) {
+  const index = props.book?.pages?.findIndex((page) => page.pageNumber === pageNumber) ?? -1
+  pageIndex.value = Math.max(0, index)
+  flipBook.value?.showPage(pageIndex.value)
+}
 
 watch(
-  () => props.session?.currentPage,
-  (pageNumber) => {
-    if (pageNumber) pageIndex.value = Math.max(0, pageNumber - 1)
+  () => [props.session?.readingSessionId, props.session?.currentPage, props.book],
+  () => {
+    showPage(props.session?.currentPage)
   },
   { immediate: true },
 )
 
-function onPageChange({ storyIndex }) {
-  pageIndex.value = storyIndex
-  audioStatus.value = 'idle'
-  audioMessage.value = ''
-  emit('record-page', props.book.pages[storyIndex]?.pageNumber || storyIndex + 1)
+async function onPageChange({ storyIndex }) {
+  const target = props.book?.pages?.[storyIndex]
+  if (!target || turnBusy.value || props.syncRequired) {
+    flipBook.value?.showPage(pageIndex.value)
+    return
+  }
+  if (target.pageNumber === currentPage.value?.pageNumber) return
+  stopNarration()
+  closeVoice()
+  if (props.session.visitedPageNumbers.includes(target.pageNumber)) {
+    showPage(target.pageNumber)
+    return
+  }
+  const serverPage = props.book.pages.find((page) => page.pageNumber === props.session.currentPage)
+  if (target.pageNumber !== serverPage?.defaultNextPageNumber || props.session.status !== 'IN_PROGRESS') {
+    flipBook.value?.showPage(pageIndex.value)
+    return
+  }
+  // Keep the widget and text on confirmed progress while the write is pending.
+  flipBook.value?.showPage(pageIndex.value)
+  turnBusy.value = true
+  try {
+    await props.recordPage(target.pageNumber)
+  } catch (error) {
+    audioMessage.value = describeApiError(error)
+  } finally {
+    showPage(props.session.currentPage)
+    turnBusy.value = false
+  }
 }
 
 function goPrevious() {
-  if (pageIndex.value > 0) flipBook.value?.flipPrev()
+  const visited = props.session.visitedPageNumbers
+  const index = visited.indexOf(currentPage.value?.pageNumber)
+  if (index > 0) onPageChange({ storyIndex: props.book.pages.findIndex((page) => page.pageNumber === visited[index - 1]) })
 }
 
 async function goNext() {
+  if (turnBusy.value || props.syncRequired) return
   if (isLast.value) {
-    emit('complete')
+    stopNarration()
+    closeVoice()
+    turnBusy.value = true
+    try { await props.completeReading() } catch (error) { audioMessage.value = describeApiError(error) }
+    finally { turnBusy.value = false }
     return
   }
-  flipBook.value?.flipNext()
+  const index = props.book.pages.findIndex((page) => page.pageNumber === currentPage.value.defaultNextPageNumber)
+  await onPageChange({ storyIndex: index })
+}
+
+function stopNarration() {
+  audioGeneration += 1
+  speechRequest?.abort()
+  speechRequest = null
+  if (audio) {
+    audio.onended = audio.onerror = null
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+    audio = null
+  }
+  window.speechSynthesis?.cancel()
+  audioStatus.value = 'idle'
+  audioMessage.value = ''
+}
+
+function voiceSnapshot() {
+  return { readingSessionId: props.session.readingSessionId, pageNumber: currentPage.value.pageNumber, revision: props.session.revision }
 }
 
 async function playNarration() {
-  if (!currentPage.value) return
-  if (audioStatus.value === 'playing') {
-    document.querySelector('#zhiya-reader-audio')?.pause()
-    audioStatus.value = 'idle'
+  if (['playing', 'loading'].includes(audioStatus.value)) {
+    stopNarration()
     return
   }
-  if (!props.session?.preview && props.authenticated && currentPage.value) {
+  if (!currentPage.value || !mediaAllowed.value) return
+  stopNarration()
+  const generation = audioGeneration
+  const pageNumber = currentPage.value.pageNumber
+  if (!props.session.preview) {
     try {
+      speechRequest = new AbortController()
       audioStatus.value = 'loading'
       audioMessage.value = '正在生成朗读'
-      const data = await synthesize({
-        readingSessionId: props.session.readingSessionId,
-        pageNumber: currentPage.value.pageNumber,
-        revision: props.session.revision,
-      })
-      const audio = new Audio(data.audioUrl)
-      audio.id = 'zhiya-reader-audio'
-      audio.onended = () => { audioStatus.value = 'idle'; audioMessage.value = '朗读完成' }
-      audio.onerror = () => { audioStatus.value = 'error'; audioMessage.value = '播放失败，文字仍可阅读' }
+      const data = await synthesize(voiceSnapshot(), speechRequest.signal)
+      if (generation !== audioGeneration) return
+      audio = new Audio(data.audioUrl)
+      audio.onended = () => { stopNarration(); audioMessage.value = '朗读完成' }
+      audio.onerror = () => { stopNarration(); audioMessage.value = '播放失败，文字仍可阅读' }
       await audio.play()
+      if (generation !== audioGeneration) return
       audioStatus.value = 'playing'
-      audioMessage.value = `正在朗读第 ${currentPage.value.pageNumber} 页`
-      return
+      audioMessage.value = `正在朗读第 ${pageNumber} 页`
     } catch (error) {
+      if (generation !== audioGeneration) return
+      stopNarration()
       audioStatus.value = 'error'
-      audioMessage.value = error.message || '语音合成暂时不可用'
+      audioMessage.value = describeApiError(error)
     }
+    return
   }
   if ('speechSynthesis' in window) {
     speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(currentPage.value.text)
     utterance.lang = 'zh-CN'
     utterance.rate = .92
-    utterance.onend = () => { audioStatus.value = 'idle'; audioMessage.value = '朗读完成' }
-    utterance.onerror = () => { audioStatus.value = 'error'; audioMessage.value = '浏览器朗读失败，文字仍可阅读' }
+    utterance.onend = () => { if (generation === audioGeneration) { audioStatus.value = 'idle'; audioMessage.value = '朗读完成' } }
+    utterance.onerror = () => { if (generation === audioGeneration) { audioStatus.value = 'error'; audioMessage.value = '浏览器朗读失败，文字仍可阅读' } }
     audioStatus.value = 'playing'
     audioMessage.value = '正在使用浏览器朗读'
     speechSynthesis.speak(utterance)
@@ -100,10 +174,14 @@ async function playNarration() {
 
 async function toggleRecording() {
   voiceError.value = ''
+  if (['starting', 'processing'].includes(voiceState.value)) return
   if (voiceState.value === 'recording') {
+    submitRecording = true
+    voiceState.value = 'processing'
     recorder?.stop()
     return
   }
+  if (!mediaAllowed.value) return
   if (props.session?.preview || !props.authenticated) {
     voiceState.value = 'unavailable'
     voiceError.value = '当前是本地预览模式。登录并创建后端阅读会话后才能上传录音。'
@@ -114,49 +192,114 @@ async function toggleRecording() {
     voiceError.value = '当前浏览器不支持录音，请使用文字输入与孩子交流。'
     return
   }
+  const generation = ++voiceGeneration
+  submitRecording = false
+  const snapshot = voiceSnapshot()
+  let stream = null
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    chunks = []
-    recorder = new MediaRecorder(stream)
-    recorder.ondataavailable = (event) => {
+    voiceState.value = 'starting'
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    if (generation !== voiceGeneration) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    recordingStream = stream
+    const chunks = []
+    const activeRecorder = new MediaRecorder(stream)
+    recorder = activeRecorder
+    activeRecorder.ondataavailable = (event) => {
       if (event.data.size) chunks.push(event.data)
     }
-    recorder.onstop = async () => {
+    activeRecorder.onstop = async () => {
       stream.getTracks().forEach((track) => track.stop())
-      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+      if (generation !== voiceGeneration) return
+      recorder = recordingStream = null
+      if (!submitRecording) { voiceState.value = 'idle'; return }
+      if (!chunks.some((chunk) => chunk.size)) {
+        voiceState.value = 'error'
+        voiceError.value = '没有录到声音，请重新录制。'
+        return
+      }
+      const blob = new Blob(chunks, { type: activeRecorder.mimeType || 'audio/webm' })
       voiceState.value = 'processing'
       try {
-        const result = await transcribe(blob, {
-          readingSessionId: props.session.readingSessionId,
-          pageNumber: currentPage.value.pageNumber,
-          revision: props.session.revision,
-        })
+        recognitionRequest = new AbortController()
+        const result = await transcribe(blob, snapshot, recognitionRequest.signal)
+        if (generation !== voiceGeneration) return
         transcript.value = result.text
         voiceState.value = result.reliable ? 'recognized' : 'uncertain'
       } catch (error) {
+        if (generation !== voiceGeneration) return
         voiceState.value = 'error'
-        voiceError.value = error.message || '语音识别失败'
+        voiceError.value = describeApiError(error)
       }
     }
-    recorder.start()
+    activeRecorder.onerror = () => {
+      if (generation !== voiceGeneration) return
+      cancelRecording()
+      voiceState.value = 'error'
+      voiceError.value = '录音失败，请重新录制。'
+    }
+    activeRecorder.start()
     voiceState.value = 'recording'
   } catch {
+    stream?.getTracks().forEach((track) => track.stop())
+    if (generation !== voiceGeneration) return
+    cancelRecording()
     voiceState.value = 'error'
     voiceError.value = '麦克风不可用，可以和孩子口头讨论当前问题。'
   }
 }
 
 function openVoice() {
+  if (!mediaAllowed.value) return
+  stopNarration()
+  cancelRecording()
   voiceOpen.value = true
   voiceState.value = 'idle'
   transcript.value = ''
   voiceError.value = ''
 }
 
+function cancelRecording() {
+  voiceGeneration += 1
+  submitRecording = false
+  recognitionRequest?.abort()
+  recognitionRequest = null
+  if (recorder) {
+    recorder.onstop = recorder.ondataavailable = recorder.onerror = null
+    if (recorder.state !== 'inactive') recorder.stop()
+    recorder = null
+  }
+  recordingStream?.getTracks().forEach((track) => track.stop())
+  recordingStream = null
+  voiceState.value = 'idle'
+  transcript.value = ''
+}
+
 function closeVoice() {
-  try { recorder?.stop() } catch {}
+  cancelRecording()
   voiceOpen.value = false
 }
+
+function leaveReader() {
+  stopNarration()
+  closeVoice()
+  emit('back', props.book)
+}
+
+async function refreshProgress() {
+  if (turnBusy.value) return
+  turnBusy.value = true
+  try { await props.refreshReading() } catch (error) { audioMessage.value = describeApiError(error) }
+  finally { showPage(props.session?.currentPage); turnBusy.value = false }
+}
+
+watch(() => [props.session?.readingSessionId, props.session?.currentPage, props.session?.revision, props.session?.status, props.authenticated, props.loading, props.syncRequired], () => {
+  stopNarration()
+  closeVoice()
+})
+onBeforeUnmount(() => { stopNarration(); closeVoice() })
 </script>
 
 <template>
@@ -166,9 +309,11 @@ function closeVoice() {
   <main v-else-if="book && session" class="reader-page page-width">
     <div class="reader-heading">
       <div>
-        <button class="text-button" type="button" @click="emit('back', book)">← 返回绘本详情</button>
+        <button class="text-button" type="button" @click="leaveReader">← 返回绘本详情</button>
         <h1>{{ book.title }}</h1>
-        <p>第 {{ currentPage?.pageNumber }} / {{ book.pageCount }} 页 · {{ session.preview ? '本地预览' : '后端会话已同步' }}</p>
+        <p>第 {{ currentPage?.pageNumber }} 页 · 共 {{ book.pageCount }} 页 · {{ session.preview ? '本地预览' : syncRequired ? '进度待确认' : turnBusy ? '正在同步进度' : rereading ? `回看已读页，服务端进度为第 ${session.currentPage} 页` : '后端会话已同步' }}</p>
+        <p v-if="rereading">回看期间仅阅读文字和插图；返回当前进度后可继续朗读与录音。</p>
+        <button v-if="syncRequired" class="secondary" type="button" :disabled="turnBusy" @click="refreshProgress">确认并同步进度</button>
       </div>
       <span class="pill">{{ report ? '本次阅读已完成' : '亲子共读模式' }}</span>
     </div>
@@ -178,20 +323,21 @@ function closeVoice() {
         <div class="flipbook-stage">
           <FlipBook
             ref="flipBook"
+            :key="session.readingSessionId"
             :pages="book.pages"
-            :cover="book.cover"
             :title="book.title"
             :start-page="pageIndex"
+            :disabled="turnBusy || syncRequired"
             @page-change="onPageChange"
             @error="audioMessage = $event"
           />
           <p class="flip-hint">拖动书页边缘，或点击外侧翻页</p>
         </div>
         <nav class="reader-dock" aria-label="阅读控制">
-          <button class="dock-button" type="button" :disabled="pageIndex === 0" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
-          <button class="dock-button" type="button" @click="playNarration"><span class="dock-glyph">{{ audioStatus === 'playing' ? 'Ⅱ' : '▶' }}</span>{{ audioStatus === 'playing' ? '暂停朗读' : '朗读' }}</button>
-          <button class="dock-button primary" type="button" @click="openVoice"><span class="dock-glyph">芽</span>问知芽</button>
-          <button class="dock-button" type="button" @click="goNext"><span class="dock-glyph">{{ isLast ? '✓' : '›' }}</span>{{ isLast ? '完成' : '下一页' }}</button>
+          <button class="dock-button" type="button" :disabled="pageIndex === 0 || turnBusy || syncRequired" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
+          <button class="dock-button" type="button" :disabled="!mediaAllowed" @click="playNarration"><span class="dock-glyph">{{ audioStatus === 'playing' ? 'Ⅱ' : '▶' }}</span>{{ audioStatus === 'playing' ? '暂停朗读' : audioStatus === 'loading' ? '取消朗读' : '朗读' }}</button>
+          <button class="dock-button primary" type="button" :disabled="!mediaAllowed" @click="openVoice"><span class="dock-glyph">芽</span>语音识别</button>
+          <button class="dock-button" type="button" :disabled="turnBusy || syncRequired || (isLast && session.status !== 'IN_PROGRESS')" @click="goNext"><span class="dock-glyph">{{ isLast ? '✓' : '›' }}</span>{{ isLast ? '完成' : '下一页' }}</button>
         </nav>
       </section>
 
@@ -201,16 +347,16 @@ function closeVoice() {
         </div>
         <section class="side-card question-card">
           <h2>✦ 共读小提问</h2>
-          <p>{{ currentPage?.question }}</p>
+          <p>{{ session.preview ? `本地预览问题：${currentPage?.question}` : '互动问答尚未接入，暂不能提交理解程度或生成追问。' }}</p>
           <div class="question-actions">
-            <button class="secondary" type="button">已理解</button>
-            <button class="secondary" type="button">还没懂</button>
-            <button class="primary" type="button" @click="openVoice">孩子来回答</button>
+            <button class="secondary" type="button" disabled>已理解（暂不可用）</button>
+            <button class="secondary" type="button" disabled>还没懂（暂不可用）</button>
+            <button class="primary" type="button" :disabled="!mediaAllowed" @click="openVoice">试用语音识别</button>
           </div>
         </section>
         <section class="side-card parent-tip">
           <h2>给家长的共读提示</h2>
-          <p>{{ currentPage?.answer }}</p>
+          <p>{{ session.preview ? currentPage?.answer : '可以和孩子一起阅读当前页。个性化共读提示尚未接入。' }}</p>
         </section>
         <section v-if="report" class="side-card">
           <h2>本次共读小结</h2>
@@ -222,18 +368,19 @@ function closeVoice() {
     <div v-if="voiceOpen" class="modal-backdrop" @click.self="closeVoice">
       <section class="modal-card voice-card" role="dialog" aria-modal="true" aria-labelledby="voice-title">
         <div class="modal-head">
-          <div><h2 id="voice-title">问知芽</h2><p>{{ book.title }} · 第 {{ currentPage?.pageNumber }} 页</p></div>
-          <button class="modal-close" type="button" aria-label="关闭" @click="closeVoice">×</button>
+          <div><h2 id="voice-title">语音识别</h2><p>{{ book.title }} · 第 {{ currentPage?.pageNumber }} 页</p></div>
+          <button class="modal-close" type="button" aria-label="取消录音并关闭" @click="closeVoice">×</button>
         </div>
         <div class="voice-center">
-          <button class="mic-button" :class="{ recording: voiceState === 'recording' }" type="button" @click="toggleRecording">
+          <button class="mic-button" :class="{ recording: voiceState === 'recording' }" :disabled="['starting', 'processing'].includes(voiceState)" :aria-label="voiceState === 'recording' ? '停止并识别' : '开始录音'" type="button" @click="toggleRecording">
             {{ voiceState === 'recording' ? '■' : '◉' }}
           </button>
-          <h3>{{ voiceState === 'recording' ? '正在录音' : voiceState === 'processing' ? '正在识别' : '点一下，说出你的问题' }}</h3>
+          <h3>{{ voiceState === 'recording' ? '正在录音，点停止后识别' : voiceState === 'starting' ? '正在申请麦克风' : voiceState === 'processing' ? '正在识别' : '点一下，说出你的问题' }}</h3>
           <p v-if="voiceError" class="form-error">{{ voiceError }}</p>
-          <p v-else>录音会通过后端语音识别上传；当前问答生成接口尚未上线，因此这里先展示识别结果。</p>
+          <p v-else>点击“停止并识别”才会上传录音；取消会丢弃录音。本页仅展示识别结果，尚未接入问答生成。</p>
           <div v-if="transcript" class="transcript-box"><label>识别到的问题</label><p>{{ transcript }}</p></div>
         </div>
+        <button class="secondary" type="button" @click="closeVoice">取消并关闭</button>
       </section>
     </div>
   </main>

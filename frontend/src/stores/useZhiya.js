@@ -1,5 +1,5 @@
 import { computed, reactive, readonly } from 'vue'
-import { ApiError, createClientEventId } from '../api/client'
+import { ApiError, createClientEventId, describeApiError } from '../api/client'
 import { checkHealth, login, logout, register } from '../api/auth'
 import { createProfile, listProfiles, updateProfile } from '../api/profiles'
 import { getStoryVersion, listStorybooks } from '../api/storybooks'
@@ -50,12 +50,44 @@ const state = reactive({
   currentEvents: [],
   currentReport: null,
   sessionLoading: false,
+  sessionBusy: false,
+  readingSyncRequired: false,
   sessions: [],
   sessionsLoading: false,
   toast: { message: '', tone: 'info', visible: false },
 })
 
 let toastTimer = null
+let authEpoch = 0
+let booksRequest = 0
+let readingEpoch = 0
+let pendingReading = null
+
+function clearAccountData() {
+  state.profiles = []
+  state.activeProfileId = 0
+  state.sessions = []
+  state.currentBook = null
+  state.currentSession = null
+  state.currentEvents = []
+  state.currentReport = null
+  state.bookFilters = { ageBand: '', topic: '' }
+  state.selectedBookId = previewBooks[0].id
+  readingEpoch += 1
+  state.sessionLoading = state.sessionBusy = state.sessionsLoading = state.detailLoading = state.booksLoading = false
+  state.readingSyncRequired = false
+  pendingReading = null
+  for (const key of ['account', 'activeProfileId', 'selectedBookId', 'plan', 'guardianNickname']) {
+    localStorage.removeItem(`zhiya.${key}`)
+  }
+  loadPreviewBooks()
+}
+
+function resetAuthentication() {
+  authEpoch += 1
+  clearAccountData()
+  state.auth = { status: 'anonymous', authenticated: false, accountId: null, account: '', nickname: '知芽家长' }
+}
 
 function activeProfile() {
   return state.profiles.find((profile) => profile.childProfileId === state.activeProfileId) || state.profiles[0] || null
@@ -104,6 +136,8 @@ function loadPreviewBooks(message = '') {
 }
 
 async function loadBooks(filters = {}) {
+  const epoch = authEpoch
+  const request = ++booksRequest
   state.bookFilters = { ...state.bookFilters, ...filters }
   state.booksLoading = true
   state.booksError = ''
@@ -116,26 +150,29 @@ async function loadBooks(filters = {}) {
       ageBand: state.bookFilters.ageBand || undefined,
       topic: state.bookFilters.topic || undefined,
     })
+    if (epoch !== authEpoch || request !== booksRequest) return
     if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
       loadPreviewBooks('后端当前没有可见的已发布绘本，当前展示本地设计预览。')
       return
     }
     applyBooks(items.map(mapApiBook), 'api')
   } catch (error) {
+    if (epoch !== authEpoch || request !== booksRequest) return
     if (error instanceof ApiError && error.status === 401) {
-      state.auth.status = 'anonymous'
-      state.auth.authenticated = false
+      resetAuthentication()
       loadPreviewBooks('登录后读取后端绘本，当前展示本地设计预览。')
     } else {
       loadPreviewBooks(error.message || '绘本列表暂时不可用，已切换到本地预览。')
     }
   } finally {
-    state.booksLoading = false
+    if (request === booksRequest) state.booksLoading = false
   }
 }
 
 async function loadProfiles() {
+  const epoch = authEpoch
   const items = await listProfiles()
+  if (epoch !== authEpoch) return []
   state.profiles = items
   if (!items.some((profile) => profile.childProfileId === state.activeProfileId)) {
     state.activeProfileId = items[0]?.childProfileId || 0
@@ -145,18 +182,23 @@ async function loadProfiles() {
 }
 
 async function bootstrap() {
+  const epoch = authEpoch
   try {
     await checkHealth()
     state.health = 'ready'
   } catch {
     state.health = 'offline'
   }
+  if (epoch !== authEpoch) return
   try {
     await loadProfiles()
+    if (epoch !== authEpoch) return
     state.auth.status = 'authenticated'
     state.auth.authenticated = true
     await loadBooks()
   } catch (error) {
+    if (epoch !== authEpoch) return
+    clearAccountData()
     if (error instanceof ApiError && error.status === 401) {
       state.auth.status = 'anonymous'
     } else {
@@ -170,7 +212,10 @@ async function bootstrap() {
 }
 
 async function signIn(account, password) {
+  resetAuthentication()
+  const epoch = authEpoch
   const result = await login(account, password)
+  if (epoch !== authEpoch) return
   state.auth.accountId = result.data.accountId
   state.auth.account = account
   state.auth.authenticated = true
@@ -178,6 +223,7 @@ async function signIn(account, password) {
   localStorage.setItem('zhiya.account', account)
   await loadProfiles()
   await loadBooks()
+  if (epoch !== authEpoch) return
   setToast('已登录知芽家长空间')
   navigate(state.books.length ? 'library' : 'account/children')
 }
@@ -189,24 +235,28 @@ async function signUp(account, password) {
 }
 
 async function signOut() {
+  if (state.auth.status === 'signing-out') return false
+  authEpoch += 1
+  const epoch = authEpoch
+  state.auth.status = 'signing-out'
   try {
     await logout()
-  } catch {}
-  state.auth = {
-    status: 'anonymous',
-    authenticated: false,
-    accountId: null,
-    account: '',
-    nickname: '知芽家长',
+  } catch (error) {
+    if (epoch !== authEpoch) return false
+    if (error.status !== 401) {
+      state.auth.status = 'authenticated'
+      state.sessionBusy = false
+      state.readingSyncRequired = Boolean(state.currentSession && !state.currentSession.preview)
+      setToast('退出尚未确认，服务器会话可能仍有效。请检查网络后重试退出。', 'error')
+      return false
+    }
   }
-  state.profiles = []
-  state.activeProfileId = 0
-  state.sessions = []
-  state.currentSession = null
+  if (epoch !== authEpoch) return false
+  resetAuthentication()
   loadPreviewBooks('已退出账号，当前展示本地设计预览。')
-  localStorage.removeItem('zhiya.account')
   navigate('home')
   setToast('已退出当前账号')
+  return true
 }
 
 function selectProfile(profileId) {
@@ -216,16 +266,22 @@ function selectProfile(profileId) {
 }
 
 async function addProfile(payload) {
+  const epoch = authEpoch
   const profile = await createProfile(payload)
+  if (epoch !== authEpoch) return
   await loadProfiles()
+  if (epoch !== authEpoch) return
   selectProfile(profile.childProfileId)
   setToast('儿童档案已创建')
   return profile
 }
 
 async function editProfile(profileId, payload) {
+  const epoch = authEpoch
   const profile = await updateProfile(profileId, payload)
+  if (epoch !== authEpoch) return
   await loadProfiles()
+  if (epoch !== authEpoch) return
   setToast('儿童档案已更新')
   return profile
 }
@@ -242,6 +298,8 @@ function openDetail(bookOrVersionId) {
 }
 
 async function loadDetail(versionId) {
+  const epoch = authEpoch
+  const route = location.hash
   state.detailLoading = true
   state.currentBook = null
   try {
@@ -251,16 +309,18 @@ async function loadDetail(versionId) {
       return
     }
     const version = await getStoryVersion(Number(versionId))
+    if (epoch !== authEpoch || route !== location.hash) return
     state.currentBook = mapApiBook(version)
   } catch (error) {
-    setToast(error.message || '绘本详情暂时不可用', 'error')
+    if (epoch === authEpoch && route === location.hash) setToast(describeApiError(error), 'error')
   } finally {
-    state.detailLoading = false
+    if (epoch === authEpoch && route === location.hash) state.detailLoading = false
   }
 }
 
 async function startReading(book) {
-  if (!book) return
+  if (!book || state.sessionBusy) return
+  const epoch = authEpoch
   state.currentBook = book
   state.currentEvents = []
   state.currentReport = null
@@ -284,36 +344,38 @@ async function startReading(book) {
     return
   }
   try {
+    state.sessionBusy = true
     const created = await createReadingSession({
       childProfileId: profile.childProfileId,
       storyVersionId: book.storyVersionId,
     })
-    const started = await addReadingEvent(created.readingSessionId, {
-      eventType: 'STARTED',
-      pageNumber: 1,
-      expectedRevision: created.revision,
-      clientEventId: createClientEventId('start'),
-    })
-    state.currentSession = {
-      ...created,
-      status: 'IN_PROGRESS',
-      currentPage: 1,
-      visitedPageNumbers: [1],
-      revision: started.revision,
-    }
+    if (epoch !== authEpoch) return
+    state.currentSession = created
     navigate(`reader/${created.readingSessionId}`)
   } catch (error) {
-    setToast(error.message || '无法创建阅读会话', 'error')
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
+  } finally {
+    if (epoch === authEpoch) state.sessionBusy = false
   }
 }
 
 async function loadReaderRoute() {
+  const epoch = authEpoch
+  const generation = ++readingEpoch
+  const route = { ...state.route }
+  const routeHash = location.hash
+  const isCurrent = () => epoch === authEpoch && generation === readingEpoch && routeHash === location.hash
   state.sessionLoading = true
+  state.sessionBusy = false
+  state.readingSyncRequired = false
+  pendingReading = null
+  state.currentSession = null
+  state.currentBook = null
   state.currentEvents = []
   state.currentReport = null
   try {
-    if (state.route.previewVersionId) {
-      const book = previewBooks.find((item) => item.storyVersionId === state.route.previewVersionId)
+    if (route.previewVersionId) {
+      const book = previewBooks.find((item) => item.storyVersionId === route.previewVersionId)
       if (!book) throw new Error('本地预览绘本不可用')
       state.currentBook = book
       state.currentSession = {
@@ -327,52 +389,152 @@ async function loadReaderRoute() {
       }
       return
     }
-    if (!state.route.sessionId) return
-    const detail = await getReadingSession(state.route.sessionId)
-    state.currentSession = detail.session
-    state.currentEvents = detail.events
-    state.currentReport = detail.report
-    const cached = state.books.find((book) => book.storyVersionId === detail.session.storyVersionId)
-    state.currentBook = cached || mapApiBook(await getStoryVersion(detail.session.storyVersionId))
+    if (!route.sessionId) return
+    const detail = await getReadingSession(route.sessionId)
+    if (!isCurrent()) return
+    const cached = state.books.find((book) => book.source === 'api' && book.storyVersionId === detail.session.storyVersionId)
+    const book = cached || mapApiBook(await getStoryVersion(detail.session.storyVersionId))
+    if (!isCurrent()) return
+    applyReadingDetail(detail)
+    state.currentBook = book
+    if (detail.session.status === 'CREATED') {
+      await writeReading({
+        sessionId: detail.session.readingSessionId,
+        kind: 'page',
+        payload: { eventType: 'STARTED', pageNumber: 1, expectedRevision: detail.session.revision, clientEventId: createClientEventId('start') },
+      })
+    }
   } catch (error) {
-    setToast(error.message || '阅读会话不可用', 'error')
-    state.currentSession = null
+    if (isCurrent()) {
+      setToast(describeApiError(error), 'error')
+      state.currentSession = null
+    }
   } finally {
-    state.sessionLoading = false
+    if (isCurrent()) state.sessionLoading = false
+  }
+}
+
+function applyReadingDetail(detail) {
+  state.currentSession = detail.session
+  state.currentEvents = detail.events || []
+  state.currentReport = detail.report
+}
+
+function sameReading(operation, epoch, generation) {
+  return epoch === authEpoch && generation === readingEpoch && state.currentSession?.readingSessionId === operation.sessionId
+}
+
+async function writeReading(operation) {
+  if (state.sessionBusy) return false
+  const epoch = authEpoch
+  const generation = readingEpoch
+  state.sessionBusy = true
+  try {
+    const result = operation.kind === 'finish'
+      ? await completeReadingSession(operation.sessionId, operation.payload)
+      : await addReadingEvent(operation.sessionId, operation.payload)
+    if (!sameReading(operation, epoch, generation)) return false
+    if (operation.kind === 'finish') {
+      state.currentSession = result.session
+      state.currentReport = result.report
+      setToast('阅读记录已保存')
+    } else {
+      const session = state.currentSession
+      session.currentPage = operation.payload.pageNumber
+      session.visitedPageNumbers = [...new Set([...session.visitedPageNumbers, operation.payload.pageNumber])]
+      session.status = 'IN_PROGRESS'
+      session.revision = result.revision
+    }
+    pendingReading = null
+    state.readingSyncRequired = false
+    return true
+  } catch (error) {
+    if (!sameReading(operation, epoch, generation)) return false
+    const unknown = ['REQUEST_OUTCOME_UNKNOWN', 'REQUEST_IN_PROGRESS'].includes(error.code) || error.status === 0 || error.status === 504
+    pendingReading = unknown ? { ...operation, retryAt: Date.now() + (Number(error.retryAfter) || 1) * 1000 } : null
+    state.readingSyncRequired = unknown || error.status === 409
+    if (state.readingSyncRequired) {
+      try {
+        const detail = await getReadingSession(operation.sessionId)
+        if (!sameReading(operation, epoch, generation)) return false
+        applyReadingDetail(detail)
+        // A changed revision makes any still-running old write stale. Otherwise
+        // retain its original id/body until the user explicitly confirms it.
+        if (!unknown || detail.session.revision !== operation.payload.expectedRevision) {
+          pendingReading = null
+          state.readingSyncRequired = false
+        }
+      } catch {
+        // Keep writes disabled until the authoritative session can be read.
+      }
+    }
+    setToast(`${describeApiError(error)}${state.readingSyncRequired ? ' 请使用“确认并同步进度”。' : ''}`, 'error')
+    return false
+  } finally {
+    if (sameReading(operation, epoch, generation)) state.sessionBusy = false
+  }
+}
+
+async function refreshReading() {
+  const session = state.currentSession
+  if (!session || session.preview || state.sessionBusy) return false
+  const epoch = authEpoch
+  const generation = readingEpoch
+  const operation = pendingReading
+  const target = { sessionId: session.readingSessionId }
+  state.sessionBusy = true
+  try {
+    const detail = await getReadingSession(target.sessionId)
+    if (!sameReading(target, epoch, generation)) return false
+    applyReadingDetail(detail)
+    if (operation && detail.session.revision === operation.payload.expectedRevision) {
+      if (Date.now() < operation.retryAt) {
+        setToast('原请求仍在处理，请稍后再次确认。', 'error')
+        return false
+      }
+      state.sessionBusy = false
+      return await writeReading(operation)
+    }
+    pendingReading = null
+    state.readingSyncRequired = false
+    return true
+  } catch (error) {
+    if (sameReading(target, epoch, generation)) {
+      state.readingSyncRequired = true
+      setToast(describeApiError(error), 'error')
+    }
+    return false
+  } finally {
+    if (sameReading(target, epoch, generation)) state.sessionBusy = false
   }
 }
 
 async function recordPageChange(pageNumber) {
   const session = state.currentSession
-  if (!session || pageNumber <= session.currentPage) return
+  if (!session || session.status !== 'IN_PROGRESS' || state.sessionBusy || state.readingSyncRequired) return false
+  const currentPage = state.currentBook?.pages.find((page) => page.pageNumber === session.currentPage)
+  if (pageNumber !== currentPage?.defaultNextPageNumber) return false
   if (session.preview) {
     session.currentPage = pageNumber
     session.visitedPageNumbers = [...new Set([...session.visitedPageNumbers, pageNumber])]
     session.revision += 1
-    return
+    return true
   }
-  try {
-    const result = await addReadingEvent(session.readingSessionId, {
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'page',
+    payload: {
       eventType: 'PAGE_CHANGED',
       pageNumber,
       expectedRevision: session.revision,
       clientEventId: createClientEventId('page'),
-    })
-    session.currentPage = pageNumber
-    session.visitedPageNumbers = [...new Set([...session.visitedPageNumbers, pageNumber])]
-    session.revision = result.revision
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 409) {
-      const detail = await getReadingSession(session.readingSessionId)
-      state.currentSession = detail.session
-    }
-    setToast(error.message || '阅读进度同步失败', 'error')
-  }
+    },
+  })
 }
 
 async function completeReading() {
   const session = state.currentSession
-  if (!session) return null
+  if (!session || session.status !== 'IN_PROGRESS' || state.sessionBusy || state.readingSyncRequired) return false
   if (session.preview) {
     session.status = 'FINISHED'
     state.currentReport = {
@@ -383,34 +545,31 @@ async function completeReading() {
     setToast('本次预览阅读已完成')
     return state.currentReport
   }
-  try {
-    const result = await completeReadingSession(session.readingSessionId, {
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'finish',
+    payload: {
       reason: 'USER_FINISH',
       expectedRevision: session.revision,
       clientEventId: createClientEventId('finish'),
-    })
-    state.currentSession = result.session
-    state.currentReport = result.report
-    setToast('阅读记录已保存')
-    return result.report
-  } catch (error) {
-    setToast(error.message || '暂时无法结束阅读', 'error')
-    return null
-  }
+    },
+  })
 }
 
 async function loadSessions() {
+  const epoch = authEpoch
   if (!state.auth.authenticated) {
     state.sessions = []
     return
   }
   state.sessionsLoading = true
   try {
-    state.sessions = await listReadingSessions()
+    const sessions = await listReadingSessions()
+    if (epoch === authEpoch) state.sessions = sessions
   } catch (error) {
-    setToast(error.message || '阅读记录暂时不可用', 'error')
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
   } finally {
-    state.sessionsLoading = false
+    if (epoch === authEpoch) state.sessionsLoading = false
   }
 }
 
@@ -459,6 +618,7 @@ export const zhiyaActions = {
   loadReaderRoute,
   recordPageChange,
   completeReading,
+  refreshReading,
   loadSessions,
   setToast,
 }

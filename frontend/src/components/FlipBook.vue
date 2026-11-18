@@ -1,17 +1,26 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { mediaUrl } from '../api/client'
 
 const props = defineProps({
   pages: { type: Array, required: true },
-  cover: { type: String, default: '' },
   title: { type: String, default: '绘本' },
   startPage: { type: Number, default: 0 },
+  disabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['page-change', 'error'])
 const container = ref(null)
 const imageErrors = ref(new Set())
 let book = null
+let syncing = false
+
+function showPage(storyIndex) {
+  syncing = true
+  try { book?.turnTo(storyIndex * 2) } finally { syncing = false }
+}
+
+watch(() => props.startPage, showPage)
 
 function markImageError(pageNumber) {
   imageErrors.value = new Set([...imageErrors.value, pageNumber])
@@ -42,6 +51,7 @@ onMounted(() => {
       click: 'edges',
     })
     book.on('flip', ({ page }) => {
+      if (syncing) return
       emit('page-change', {
         storyIndex: Math.max(0, Math.min(props.pages.length - 1, Math.floor(page / 2))),
         bookPage: page,
@@ -58,19 +68,18 @@ onBeforeUnmount(() => {
 })
 
 defineExpose({
-  flipNext: () => book?.flipNext(),
-  flipPrev: () => book?.flipPrev(),
+  showPage,
 })
 </script>
 
 <template>
-  <div ref="container" class="flipbook-book" :aria-label="`${title}软页绘本`">
+  <div ref="container" class="flipbook-book" :inert="disabled" :aria-label="`${title}软页绘本`">
     <template v-for="page in pages" :key="page.pageNumber">
       <section class="flip-page flip-page--illustration" data-density="soft" :aria-label="`第 ${page.pageNumber} 页插图`">
-        <div v-if="imageErrors.has(page.pageNumber)" class="flip-page-empty">
-          <div><h2>插图暂时无法显示</h2><p>文字内容仍可继续阅读。</p></div>
+        <div v-if="!page.imageRef || imageErrors.has(page.pageNumber)" class="flip-page-empty">
+          <div><h2>{{ page.imageRef ? '插图暂时无法显示' : '本页暂无插图' }}</h2><p>文字内容仍可继续阅读。</p></div>
         </div>
-        <img v-else :src="cover" :alt="`${title} · 第 ${page.pageNumber} 页`" draggable="false" @error="markImageError(page.pageNumber)">
+        <img v-else :src="mediaUrl(page.imageRef)" :alt="`${title} · 第 ${page.pageNumber} 页`" draggable="false" @error="markImageError(page.pageNumber)">
       </section>
       <section class="flip-page flip-page--text" data-density="soft" :aria-label="`第 ${page.pageNumber} 页文字`">
         <div class="flip-page-inner flip-page-inner--text">

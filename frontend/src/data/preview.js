@@ -1,3 +1,5 @@
+import { mediaUrl } from '../api/client'
+
 const covers = [
   '/assets/figma-prototype/home-main-cover.png',
   '/assets/figma-prototype/home-shelf-cover-1.png',
@@ -128,41 +130,31 @@ export const previewBooks = definitions.map((definition) => ({
   pages: pagesFrom(definition, definition.seeds),
 }))
 
-const knownMeta = {
-  1: { author: '[美] 玛格丽特·怀兹·布朗', topics: ['亲子依恋', '安全感', '想象力'], cover: covers[1] },
-  2: { author: '知芽项目组', topics: ['勇气', '亲子依恋'], cover: covers[4] },
-  3: { author: '知芽项目组', topics: ['友谊', '自然观察'], cover: covers[2] },
-  4: { author: '知芽项目组', topics: ['情绪安抚', '亲子依恋'], cover: covers[0] },
-  5: { author: '知芽项目组', topics: ['生命成长', '勇气'], cover: covers[3] },
-  6: { author: '知芽项目组', topics: ['生命成长', '自然观察'], cover: covers[5] },
-}
-
 export function mapApiBook(version) {
-  const meta = knownMeta[version.storybookId] || {}
-  const fallback = previewBooks[version.storybookId % previewBooks.length]
-  const pages = version.pages.map((page) => ({
-    ...page,
-    question: questions[(page.pageNumber - 1) % questions.length],
-    answer: '可以先请孩子观察画面里的角色和动作，再说一说自己的理解。',
-  }))
+  const pages = (version.pages || []).map((page) => ({ ...page }))
+  const ageLabels = { AGE_3_4: '3–4 岁', AGE_4_5: '4–5 岁', AGE_5_6: '5–6 岁' }
   return {
     id: `version-${version.storyVersionId}`,
     source: 'api',
     storyVersionId: version.storyVersionId,
     storybookId: version.storybookId,
     title: version.title,
-    author: meta.author || fallback?.author || '知芽绘本馆',
-    ageBand: version.ageBand || fallback?.ageBand || '',
-    ageLabel: fallback?.ageLabel || '适龄阅读',
-    topics: meta.topics || fallback?.topics || [],
-    cover: meta.cover || fallback?.cover || covers[0],
+    author: version.author || '作者信息暂缺',
+    ageBand: version.ageBand || '',
+    ageLabel: ageLabels[version.ageBand] || '适龄信息暂缺',
+    topics: version.topics || [],
+    cover: mediaUrl(version.coverRef) || '/assets/image-placeholder.svg',
     coverRef: version.coverRef,
-    summary: pages[0]?.text || fallback?.summary || '打开绘本，和孩子一起读一个温暖的故事。',
-    quote: fallback?.quote || pages[0]?.text || '',
+    summary: version.summary || pages[0]?.text || '内容简介暂缺',
+    quote: '',
     pageCount: pages.length,
     pages,
     status: version.status,
   }
+}
+
+export function bookStatusLabel(status) {
+  return { PREVIEW: '设计预览', PUBLISHED: '公开已发布', APPROVED_PRIVATE: '本人已审核私有绘本', RETIRED: '历史版本' }[status] || '状态待确认'
 }
 
 export { covers }

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
+import { describeApiError } from '../api/client'
 
 const props = defineProps({
   section: { type: String, default: 'overview' },
@@ -10,11 +11,13 @@ const props = defineProps({
   books: { type: Array, default: () => [] },
   totals: { type: Object, required: true },
   loading: { type: Boolean, default: false },
+  saveProfileAction: { type: Function, required: true },
 })
 
-const emit = defineEmits(['navigate', 'select-profile', 'save-profile', 'sign-out', 'start'])
+const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start'])
 const editing = ref(false)
 const saving = ref(false)
+const saveError = ref('')
 const form = reactive({ childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 })
 const plan = reactive(JSON.parse(localStorage.getItem('zhiya.plan') || '{"minutes":15,"books":1,"weekly":5}'))
 
@@ -32,11 +35,15 @@ const activeProfile = computed(() =>
 const recentSessions = computed(() => props.sessions.slice(0, 4))
 
 function openNew() {
+  if (saving.value) return
+  saveError.value = ''
   Object.assign(form, { childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 })
   editing.value = true
 }
 
 function openEdit(profile) {
+  if (saving.value) return
+  saveError.value = ''
   Object.assign(form, {
     childProfileId: profile.childProfileId,
     nickname: profile.nickname || '',
@@ -48,6 +55,8 @@ function openEdit(profile) {
 }
 
 async function saveProfile() {
+  if (saving.value) return
+  saveError.value = ''
   saving.value = true
   const payload = {
     nickname: form.nickname || null,
@@ -56,8 +65,10 @@ async function saveProfile() {
     preferredMinutes: Number(form.preferredMinutes),
   }
   try {
-    emit('save-profile', { id: form.childProfileId, payload })
+    await props.saveProfileAction({ id: form.childProfileId, payload })
     editing.value = false
+  } catch (error) {
+    saveError.value = describeApiError(error)
   } finally {
     saving.value = false
   }
@@ -134,7 +145,8 @@ function sessionTitle(session) {
             </label>
             <label class="form-field"><span>兴趣</span><input v-model="form.interests" placeholder="用顿号分隔，例如：动物、自然"></label>
             <label class="form-field"><span>每日阅读分钟</span><input v-model.number="form.preferredMinutes" type="number" min="1" max="30"></label>
-            <div class="modal-actions"><button class="secondary" type="button" @click="editing = false">取消</button><button class="primary" type="submit" :disabled="saving">保存档案</button></div>
+            <p v-if="saveError" class="form-error" role="alert">{{ saveError }}</p>
+            <div class="modal-actions"><button class="secondary" type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '正在保存…' : '保存档案' }}</button></div>
           </form>
         </template>
 
@@ -183,7 +195,7 @@ function sessionTitle(session) {
             <form class="profile-form" @submit.prevent="saveLocalNickname">
               <label class="form-field"><span>昵称</span><input :value="auth.nickname" readonly></label>
               <label class="form-field"><span>登录账号</span><input :value="auth.account" readonly></label>
-              <button class="secondary" type="button" @click="emit('sign-out')">退出登录</button>
+              <button class="secondary" type="button" :disabled="auth.status === 'signing-out'" @click="emit('sign-out')">{{ auth.status === 'signing-out' ? '正在退出…' : '退出登录' }}</button>
             </form>
           </section>
         </template>

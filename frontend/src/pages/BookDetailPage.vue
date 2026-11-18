@@ -1,4 +1,5 @@
 <script setup>
+import { bookStatusLabel } from '../data/preview'
 defineProps({
   book: { type: Object, default: null },
   loading: { type: Boolean, default: false },
@@ -19,7 +20,7 @@ const emit = defineEmits(['back', 'start'])
         <div class="detail-cover"><img :src="book.cover" :alt="`${book.title}封面`"></div>
       </div>
       <div class="detail-copy">
-        <span class="pill">{{ book.status === 'PREVIEW' ? '设计预览' : '后端已发布' }} · 亲子共读</span>
+        <span class="pill">{{ bookStatusLabel(book.status) }} · 亲子共读</span>
         <h1>{{ book.title }}</h1>
         <p class="detail-author">作者：{{ book.author }}</p>
         <div class="book-meta">

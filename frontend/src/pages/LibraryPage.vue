@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import BookCarousel from '../components/BookCarousel.vue'
+import { bookStatusLabel } from '../data/preview'
 
 const props = defineProps({
   books: { type: Array, default: () => [] },
@@ -44,7 +45,7 @@ function chooseFilter(value) {
       <div class="library-top-row">
         <aside class="library-filter-panel" :class="{ expanded: category }" aria-labelledby="library-title">
           <h2 id="library-title">绘本馆</h2>
-          <p>只展示后端当前有权限读取的已发布绘本</p>
+          <p>展示公开绘本和当前账号已审核的私有绘本</p>
           <div class="library-category-rows">
             <div class="library-category-row">
               <button class="library-category-chip" :class="{ active: !category }" type="button" @click="resetFilters">全部</button>
@@ -61,7 +62,7 @@ function chooseFilter(value) {
             </div>
           </div>
           <p v-if="source === 'preview'" class="filter-api-note">
-            {{ error || '登录并后端返回已发布绘本后，这里会自动切换为真实数据。' }}
+            {{ error || '登录并后端返回可见绘本后，这里会自动切换为真实数据。' }}
           </p>
         </aside>
 
@@ -72,7 +73,7 @@ function chooseFilter(value) {
         <article v-else-if="selected" class="library-feature-card">
           <div class="library-feature-cover"><img :src="selected.cover" :alt="`${selected.title}封面`"></div>
           <div class="library-feature-copy">
-            <span class="pill">{{ selected.status === 'PREVIEW' ? '设计预览' : '后端已发布' }} · 亲子共读</span>
+            <span class="pill">{{ bookStatusLabel(selected.status) }} · 亲子共读</span>
             <h2>{{ selected.title }}</h2>
             <p>{{ selected.author }} · {{ selected.ageLabel }} · {{ selected.pageCount }} 页</p>
             <div class="reason-box"><strong>内容简介：</strong>{{ selected.summary }}</div>
@@ -84,7 +85,7 @@ function chooseFilter(value) {
         </article>
         <div v-else class="empty-state">
           <div>
-            <h2>没有找到符合条件且已发布的绘本</h2>
+            <h2>没有找到符合条件的可见绘本</h2>
             <p>当前账号可读取的绘本为空，可切换条件或等待内容发布。</p>
             <button class="primary" type="button" @click="emit('filter', { ageBand: '', topic: '' })">查看全部</button>
           </div>
