@@ -1418,7 +1418,7 @@
     .transcript-box { padding: 15px; border: 1px solid #e3d7c6; border-radius: 13px; background: var(--paper); }
     .transcript-box label { display: flex; justify-content: space-between; gap: 10px; color: var(--brown); font-size: 11px; font-weight: 600; }
     .transcript-box label span { color: var(--muted); font-weight: 400; }
-    .transcript-box textarea { width: 100%; min-height: 100px; margin-top: 10px; padding: 10px; border: 0; outline: 0; resize: vertical; color: var(--ink); background: transparent; font-size: 14px; line-height: 23px; }
+    .transcript-box textarea { width: 100%; min-height: 100px; margin-top: 10px; padding: 10px; border: 1px solid #ded2c2; border-radius: 8px; resize: vertical; color: var(--ink); background: var(--paper); font-size: 14px; line-height: 23px; }
     .answer-card { margin-top: 12px; padding: 16px; border-radius: 13px; background: var(--leaf-pale); }
     .answer-card strong { display: block; color: var(--leaf); font-size: 11px; }
     .answer-card p { margin: 8px 0 0; font-family: var(--font-story); font-size: 14px; line-height: 24px; }

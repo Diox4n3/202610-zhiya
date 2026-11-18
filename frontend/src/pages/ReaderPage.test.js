@@ -23,6 +23,15 @@ async function startRecording() {
   await flushPromises()
 }
 
+async function receiveUnconfirmedTranscript() {
+  transcribe.mockResolvedValueOnce({ text: '小免在哪里？', status: 'RECOGNIZED', reliable: false })
+  render()
+  await startRecording()
+  await wrapper.get('.mic-button').trigger('click')
+  await flushPromises()
+  return wrapper.get('[role="dialog"]')
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   track = { stop: vi.fn() }
@@ -113,6 +122,76 @@ describe('recording lifecycle', () => {
     if (action === 'unmount') { wrapper.unmount(); wrapper = null }
     expect(track.stop).toHaveBeenCalled()
     expect(transcribe).not.toHaveBeenCalled()
+  })
+})
+
+describe('parent transcript review', () => {
+  it('displays the corrected text after the parent confirms it', async () => {
+    const dialog = await receiveUnconfirmedTranscript()
+    const editor = dialog.get('textarea')
+    expect(dialog.get('label[for="' + editor.attributes('id') + '"]').text()).toBe('待确认的转写')
+    expect(editor.element.value).toBe('小免在哪里？')
+    expect(dialog.text()).not.toContain('识别到的问题')
+    await editor.setValue('   ')
+    expect(button('确认转写').element.disabled).toBe(true)
+    await editor.setValue('  小兔在哪里？  ')
+    await button('确认转写').trigger('click')
+    expect(dialog.text()).toContain('已确认的转写')
+    expect(dialog.get('.transcript-box p').text()).toBe('小兔在哪里？')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    expect(transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows confirmation without editing and clears the result when the dialog closes', async () => {
+    const dialog = await receiveUnconfirmedTranscript()
+    await button('确认转写').trigger('click')
+    expect(dialog.get('.transcript-box p').text()).toBe('小免在哪里？')
+    await dialog.get('.modal-close').trigger('click')
+    await button('语音识别').trigger('click')
+    expect(wrapper.text()).not.toContain('小免在哪里？')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces the draft on re-recording and uploads only after the next explicit stop', async () => {
+    const dialog = await receiveUnconfirmedTranscript()
+    await dialog.get('textarea').setValue('上一段草稿')
+    await button('重新录音').trigger('click')
+    await flushPromises()
+    expect(recorders[1].state).toBe('recording')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    expect(transcribe).toHaveBeenCalledTimes(1)
+    await dialog.get('.mic-button').trigger('click')
+    await flushPromises()
+    expect(transcribe).toHaveBeenCalledTimes(2)
+    expect(dialog.text()).toContain('识别到的问题')
+    expect(dialog.text()).toContain('识别的声音')
+    expect(dialog.text()).not.toContain('上一段草稿')
+    expect(button('确认转写')).toBeUndefined()
+  })
+
+  it('discards unconfirmed edits when the reading page changes', async () => {
+    const dialog = await receiveUnconfirmedTranscript()
+    await dialog.get('textarea').setValue('只属于上一页的草稿')
+    await wrapper.setProps({ session: { ...initialSession, currentPage: 3, visitedPageNumbers: [1, 3], revision: 2 } })
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    await button('语音识别').trigger('click')
+    expect(wrapper.text()).not.toContain('只属于上一页的草稿')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the editable draft when permission for a replacement recording is denied', async () => {
+    const dialog = await receiveUnconfirmedTranscript()
+    await dialog.get('textarea').setValue('仍可确认的文字')
+    getUserMedia.mockRejectedValueOnce(new Error('permission denied'))
+    await button('重新录音').trigger('click')
+    await flushPromises()
+    expect(dialog.get('[role="alert"]').text()).toContain('麦克风不可用')
+    expect(dialog.get('textarea').element.value).toBe('仍可确认的文字')
+    await button('确认转写').trigger('click')
+    expect(dialog.get('.transcript-box p').text()).toBe('仍可确认的文字')
+    expect(transcribe).toHaveBeenCalledTimes(1)
   })
 })
 

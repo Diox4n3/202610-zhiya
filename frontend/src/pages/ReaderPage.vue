@@ -25,7 +25,8 @@ const audioMessage = ref('')
 const voiceOpen = ref(false)
 const voiceState = ref('idle')
 const voiceError = ref('')
-const transcript = ref('')
+const transcript = ref(null)
+const transcriptEditor = ref(null)
 let recorder = null
 let recordingStream = null
 let submitRecording = false
@@ -39,6 +40,8 @@ const currentPage = computed(() => props.book?.pages?.[pageIndex.value] || props
 const isLast = computed(() => currentPage.value?.defaultNextPageNumber == null)
 const rereading = computed(() => currentPage.value?.pageNumber !== props.session?.currentPage)
 const mediaAllowed = computed(() => !props.loading && !turnBusy.value && !props.syncRequired && !rereading.value && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
+
+watch(transcriptEditor, (editor) => editor?.focus(), { flush: 'post' })
 
 function showPage(pageNumber) {
   const index = props.book?.pages?.findIndex((page) => page.pageNumber === pageNumber) ?? -1
@@ -226,8 +229,8 @@ async function toggleRecording() {
         recognitionRequest = new AbortController()
         const result = await transcribe(blob, snapshot, recognitionRequest.signal)
         if (generation !== voiceGeneration) return
-        transcript.value = result.text
-        voiceState.value = result.reliable ? 'recognized' : 'uncertain'
+        transcript.value = { text: result.text, status: result.reliable === true ? 'recognized' : 'uncertain' }
+        voiceState.value = 'idle'
       } catch (error) {
         if (generation !== voiceGeneration) return
         voiceState.value = 'error'
@@ -241,6 +244,7 @@ async function toggleRecording() {
       voiceError.value = '录音失败，请重新录制。'
     }
     activeRecorder.start()
+    transcript.value = null
     voiceState.value = 'recording'
   } catch {
     stream?.getTracks().forEach((track) => track.stop())
@@ -251,13 +255,21 @@ async function toggleRecording() {
   }
 }
 
+function confirmTranscript() {
+  const draft = transcript.value
+  if (draft?.status !== 'uncertain' || !draft.text.trim()) return
+  draft.text = draft.text.trim()
+  draft.status = 'confirmed'
+  voiceError.value = ''
+}
+
 function openVoice() {
   if (!mediaAllowed.value) return
   stopNarration()
   cancelRecording()
   voiceOpen.value = true
   voiceState.value = 'idle'
-  transcript.value = ''
+  transcript.value = null
   voiceError.value = ''
 }
 
@@ -274,11 +286,11 @@ function cancelRecording() {
   recordingStream?.getTracks().forEach((track) => track.stop())
   recordingStream = null
   voiceState.value = 'idle'
-  transcript.value = ''
 }
 
 function closeVoice() {
   cancelRecording()
+  transcript.value = null
   voiceOpen.value = false
 }
 
@@ -378,18 +390,37 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
       <section class="modal-card voice-card" role="dialog" aria-modal="true" aria-labelledby="voice-title">
         <div class="modal-head">
           <div><h2 id="voice-title">语音识别</h2><p>{{ book.title }} · 第 {{ currentPage?.pageNumber }} 页</p></div>
-          <button class="modal-close" type="button" aria-label="取消录音并关闭" @click="closeVoice">×</button>
+          <button class="modal-close" type="button" aria-label="关闭语音识别" @click="closeVoice">×</button>
         </div>
-        <div class="voice-center">
-          <button class="mic-button" :class="{ recording: voiceState === 'recording' }" :disabled="['starting', 'processing'].includes(voiceState)" :aria-label="voiceState === 'recording' ? '停止并识别' : '开始录音'" type="button" @click="toggleRecording">
-            {{ voiceState === 'recording' ? '■' : '◉' }}
-          </button>
-          <h3>{{ voiceState === 'recording' ? '正在录音，点停止后识别' : voiceState === 'starting' ? '正在申请麦克风' : voiceState === 'processing' ? '正在识别' : '点一下，说出你的问题' }}</h3>
-          <p v-if="voiceError" class="form-error">{{ voiceError }}</p>
-          <p v-else>点击“停止并识别”才会上传录音；取消会丢弃录音。本页仅展示识别结果，尚未接入问答生成。</p>
-          <div v-if="transcript" class="transcript-box"><label>识别到的问题</label><p>{{ transcript }}</p></div>
-        </div>
-        <button class="secondary" type="button" @click="closeVoice">取消并关闭</button>
+        <p v-if="voiceError" class="form-error" role="alert">{{ voiceError }}</p>
+        <template v-if="transcript && voiceState !== 'starting'">
+          <div class="transcript-box">
+            <template v-if="transcript.status === 'uncertain'">
+              <label for="voice-transcript">待确认的转写</label>
+              <p id="transcript-hint">请核对孩子说的话，确认前可以修改文字。</p>
+              <textarea id="voice-transcript" ref="transcriptEditor" v-model="transcript.text" aria-describedby="transcript-hint" rows="3"></textarea>
+            </template>
+            <template v-else>
+              <h3 role="status">{{ transcript.status === 'confirmed' ? '已确认的转写' : '识别到的问题' }}</h3>
+              <p>{{ transcript.text }}</p>
+            </template>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary" type="button" @click="toggleRecording">重新录音</button>
+            <button v-if="transcript.status === 'uncertain'" class="primary" type="button" :disabled="!transcript.text.trim()" @click="confirmTranscript">确认转写</button>
+            <button v-else class="primary" type="button" @click="closeVoice">关闭</button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="voice-center">
+            <button class="mic-button" :class="{ recording: voiceState === 'recording' }" :disabled="['starting', 'processing'].includes(voiceState)" :aria-label="voiceState === 'recording' ? '停止并识别' : '开始录音'" type="button" @click="toggleRecording">
+              {{ voiceState === 'recording' ? '■' : '◉' }}
+            </button>
+            <h3>{{ voiceState === 'recording' ? '正在录音，点停止后识别' : voiceState === 'starting' ? '正在申请麦克风' : voiceState === 'processing' ? '正在识别' : '点一下，说出你的问题' }}</h3>
+            <p v-if="!voiceError">点击“停止并识别”会上传本段录音，识别结果将在这里显示。取消会丢弃录音。</p>
+          </div>
+          <button class="secondary" type="button" @click="closeVoice">取消并关闭</button>
+        </template>
       </section>
     </div>
   </main>
