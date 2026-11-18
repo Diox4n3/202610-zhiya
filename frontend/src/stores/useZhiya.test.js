@@ -332,14 +332,20 @@ describe('child-mode handoff', () => {
     reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
     await actions.loadReaderRoute()
     expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
-    profiles.listProfiles.mockRejectedValueOnce(new ApiError('服务暂不可用', {
-      status: 503,
-      code: 'DEPENDENCY_UNAVAILABLE',
-    }))
-    expect(await actions.unlockChildMode('parent-a', 'password123')).toBe(true)
+    const profileRefresh = deferred()
+    profiles.listProfiles.mockReturnValueOnce(profileRefresh.promise)
+    const unlocking = actions.unlockChildMode('parent-a', 'password123')
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(state.auth.status).toBe('authenticated')
     expect(state.childMode).toBeNull()
     expect(state.route).toEqual({ name: 'account', section: 'overview' })
+    profileRefresh.reject(new ApiError('服务暂不可用', {
+      status: 503,
+      code: 'DEPENDENCY_UNAVAILABLE',
+    }))
+    expect(await unlocking).toBe(true)
     expect(state.profilesError).toContain('服务暂不可用')
     expect(auth.parentUnlock).toHaveBeenCalledTimes(1)
 

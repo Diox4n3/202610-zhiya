@@ -97,3 +97,27 @@ it('routes a guardian credential away from a stale child handoff link', async ()
   expect(wrapper.find('.child-handoff-page').exists()).toBe(false)
   expect(wrapper.find('.site-header').exists()).toBe(true)
 })
+
+it('restores the remembered child handoff when an old child link is reopened', async () => {
+  sessionStorage.setItem('zhiya.childHandoffSessionId', '55')
+  listProfiles.mockRejectedValue(new ApiError('需要儿童授权', { status: 403, code: 'FORBIDDEN' }))
+  getReadingSession.mockResolvedValueOnce({
+    session: {
+      readingSessionId: 55,
+      storyVersionId: 88,
+      currentPage: 1,
+      visitedPageNumbers: [1],
+      status: 'CREATED',
+      revision: 0,
+      expiresAt: '2026-11-18T08:00:00Z',
+    },
+    events: [],
+    report: null,
+  })
+  getStoryVersion.mockResolvedValueOnce(book)
+  await open('child/999')
+  await vi.waitFor(() => expect(location.hash).toBe('#child/55'))
+  expect(getReadingSession).toHaveBeenCalledWith(55)
+  expect(getReadingSession).not.toHaveBeenCalledWith(999)
+  expect(wrapper.get('.child-handoff-page').text()).toContain(book.title)
+})

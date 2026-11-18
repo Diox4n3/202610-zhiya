@@ -875,10 +875,11 @@ async function loadSessions() {
 async function handleRoute() {
   updateBodyView()
   if (state.auth.status === 'child') {
-    const sessionId = state.childMode?.sessionId || savedChildSessionId() || state.route.sessionId || null
+    const rememberedSessionId = state.childMode?.sessionId || savedChildSessionId()
+    const sessionId = rememberedSessionId || state.route.sessionId || null
     if (
       state.route.name !== 'child'
-      || (state.childMode?.sessionId && state.route.sessionId !== state.childMode.sessionId)
+      || (rememberedSessionId && state.route.sessionId !== rememberedSessionId)
     ) {
       replaceRoute(sessionId ? `child/${sessionId}` : 'child')
     }

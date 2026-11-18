@@ -163,11 +163,24 @@ describe('child-mode parent unlock', () => {
     expect(wrapper.get('.child-handoff-unlock button').element.disabled).toBe(false)
   })
 
-  it('shows the backend reason when the guardian password is rejected', async () => {
-    const unlock = vi.fn().mockRejectedValue(new ApiError('账号或密码错误', {
-      status: 401,
-      code: 'INVALID_CREDENTIALS',
-    }))
+  it.each([
+    [
+      '密码错误',
+      new ApiError('账号或密码错误', { status: 401, code: 'INVALID_CREDENTIALS' }),
+      '账号或密码错误',
+    ],
+    [
+      '限流',
+      new ApiError('尝试次数过多', { status: 429, code: 'RATE_LIMITED', retryAfter: '60' }),
+      '请求过于频繁',
+    ],
+    [
+      '服务不可用',
+      new ApiError('服务暂不可用', { status: 503, code: 'DEPENDENCY_UNAVAILABLE' }),
+      '服务暂不可用',
+    ],
+  ])('shows the backend reason when unlock fails because of %s', async (_, failure, expected) => {
+    const unlock = vi.fn().mockRejectedValue(failure)
     const wrapper = render(ChildModePage, {
       childMode: { sessionId: 9, allowedStoryVersionCount: 1, expiresAt: new Date(Date.now() + 600000).toISOString() },
       auth: { account: 'parent-a' },
@@ -177,7 +190,7 @@ describe('child-mode parent unlock', () => {
     await form.find('input[type="password"]').setValue('password123')
     await form.trigger('submit')
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('账号或密码错误')
+    expect(wrapper.get('[role="alert"]').text()).toContain(expected)
   })
 
   it('omits an unverifiable authorization count after restoring a handoff', () => {
