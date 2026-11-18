@@ -2,12 +2,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError } from './api/client'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
-import { addReadingEvent, getReadingSession } from './api/reading'
+import { addReadingEvent, getReadingSession, listReadingSessions } from './api/reading'
+import { listProfiles } from './api/profiles'
 
 vi.mock('./api/auth', () => ({ checkHealth: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []) }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
-vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn() }))
+vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), listReadingSessions: vi.fn() }))
 
 const book = { storyVersionId: 88, title: '书架上的绘本', status: 'PUBLISHED', pages: [{ pageNumber: 1, text: '只在授权时可读的正文' }] }
 const missing = () => new ApiError('资源不可用', { status: 404, code: 'RESOURCE_NOT_FOUND' })
@@ -25,7 +26,9 @@ beforeEach(() => {
   vi.resetModules()
   vi.resetAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   listStorybooks.mockResolvedValue([book])
+  listReadingSessions.mockResolvedValue([])
 })
 afterEach(() => wrapper?.unmount())
 
@@ -76,4 +79,21 @@ it('lets the user explicitly start again if a terminal 504 left the session in C
   expect(addReadingEvent).toHaveBeenCalledTimes(2)
   expect(addReadingEvent.mock.calls[1][1].clientEventId).not.toBe(addReadingEvent.mock.calls[0][1].clientEventId)
   expect(wrapper.text()).not.toContain('开始本次阅读')
+})
+
+it('routes a child credential to the restricted handoff even from the home route', async () => {
+  listProfiles.mockRejectedValue(new ApiError('需要儿童授权', { status: 403, code: 'FORBIDDEN' }))
+  await open('home')
+  expect(listProfiles).toHaveBeenCalled()
+  await vi.waitFor(() => expect(location.hash).toBe('#child'))
+  expect(wrapper.find('.child-handoff-page').exists()).toBe(true)
+  expect(wrapper.find('.site-header').exists()).toBe(false)
+  expect(listStorybooks).not.toHaveBeenCalled()
+})
+
+it('routes a guardian credential away from a stale child handoff link', async () => {
+  await open('child/99')
+  expect(location.hash).toBe('#account/overview')
+  expect(wrapper.find('.child-handoff-page').exists()).toBe(false)
+  expect(wrapper.find('.site-header').exists()).toBe(true)
 })

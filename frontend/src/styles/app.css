@@ -1586,6 +1586,21 @@
     .form-error { color: var(--danger); font-size: 12px; line-height: 19px; }
     .toast.error { border-color: #e4b9ac; color: #7d3025; }
     .account-content { min-width: 0; }
+    .account-data-error {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding: 13px 15px;
+      border: 1px solid #e4b9ac;
+      border-radius: 14px;
+      color: #7d3025;
+      background: #fff5f0;
+      font-size: 12px;
+      line-height: 19px;
+    }
+    .account-data-error .secondary { flex: 0 0 auto; min-height: 34px; }
     .recent-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 0; border-bottom: 1px solid var(--line); }
     .recent-item:last-child { border-bottom: 0; }
     .recent-item p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
@@ -1661,6 +1676,14 @@
     }
     .child-handoff-unlock h2 { margin: 0; font-family: var(--font-story); font-size: 24px; }
     .child-handoff-unlock .primary { width: 100%; margin-top: 4px; }
+    .child-handoff-loading {
+      margin-top: 24px;
+      padding: 18px;
+      border-radius: 14px;
+      color: var(--muted);
+      background: var(--paper);
+      font-size: 13px;
+    }
     .child-book-range {
       max-height: 180px;
       overflow: auto;
@@ -1696,6 +1719,8 @@
       .auth-scene { padding: 22px; border-radius: 22px; }
       .auth-card { padding: 19px; }
       .recent-item { align-items: flex-start; flex-direction: column; }
+      .account-data-error { align-items: stretch; flex-direction: column; }
+      .account-data-error .secondary { width: 100%; }
       .home-actions { width: 100%; }
       .home-actions .primary,
       .home-actions .secondary { width: 100%; }

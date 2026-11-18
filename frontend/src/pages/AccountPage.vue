@@ -6,6 +6,8 @@ const props = defineProps({
   section: { type: String, default: 'overview' },
   auth: { type: Object, required: true },
   profiles: { type: Array, default: () => [] },
+  profilesError: { type: String, default: '' },
+  profilesLoading: { type: Boolean, default: false },
   activeProfileId: { type: Number, default: 0 },
   sessions: { type: Array, default: () => [] },
   books: { type: Array, default: () => [] },
@@ -14,6 +16,7 @@ const props = defineProps({
   saveProfileAction: { type: Function, required: true },
   deleteProfileAction: { type: Function, default: async () => false },
   deleteSessionAction: { type: Function, default: async () => false },
+  reloadAccountDataAction: { type: Function, default: async () => false },
 })
 
 const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start'])
@@ -91,6 +94,10 @@ function sessionTitle(session) {
   return props.books.find((book) => book.storyVersionId === session.storyVersionId)?.title || `绘本期号 ${session.storyVersionId}`
 }
 
+function sessionRecordLabel(session) {
+  return `阅读记录 #${session.readingSessionId}`
+}
+
 function askDeleteProfile(profile) {
   deleteError.value = ''
   deleteTarget.value = { type: 'profile', id: profile.childProfileId, title: profile.nickname || '这个儿童档案' }
@@ -98,7 +105,11 @@ function askDeleteProfile(profile) {
 
 function askDeleteSession(session) {
   deleteError.value = ''
-  deleteTarget.value = { type: 'session', id: session.readingSessionId, title: sessionTitle(session) }
+  deleteTarget.value = {
+    type: 'session',
+    id: session.readingSessionId,
+    title: `${sessionTitle(session)}（${sessionRecordLabel(session)}）`,
+  }
 }
 
 async function confirmDelete() {
@@ -145,10 +156,16 @@ async function confirmDelete() {
       </aside>
 
       <section class="account-content">
+        <div v-if="profilesError" class="account-data-error" role="alert">
+          <span>{{ profilesError }}</span>
+          <button class="secondary" type="button" :disabled="profilesLoading" @click="reloadAccountDataAction">
+            {{ profilesLoading ? '正在重新读取…' : '重新读取家长资料' }}
+          </button>
+        </div>
         <template v-if="section === 'children'">
           <div class="account-title">
             <div><h1>我的宝贝</h1><p>记录孩子的成长，让每一次阅读都更有意义。</p></div>
-            <button class="primary" type="button" :disabled="!auth.authenticated" @click="openNew">＋ 添加孩子</button>
+            <button class="primary" type="button" :disabled="!auth.authenticated || profilesLoading || Boolean(profilesError)" @click="openNew">＋ 添加孩子</button>
           </div>
           <div v-if="profiles.length" class="child-grid">
             <article v-for="profile in profiles" :key="profile.childProfileId" class="account-card child-card" :class="{ active: profile.childProfileId === activeProfileId }">
@@ -163,7 +180,7 @@ async function confirmDelete() {
               </div>
             </article>
           </div>
-          <div v-else class="empty-state"><div><h2>还没有儿童档案</h2><p>登录后添加孩子，才能创建真实阅读会话。</p><button class="primary" type="button" @click="openNew">添加孩子</button></div></div>
+          <div v-else-if="!profilesError" class="empty-state"><div><h2>还没有儿童档案</h2><p>登录后添加孩子，才能创建真实阅读会话。</p><button class="primary" type="button" @click="openNew">添加孩子</button></div></div>
 
           <form v-if="editing" class="account-card profile-form" @submit.prevent="saveProfile">
             <h2>{{ form.childProfileId ? '编辑档案' : '添加孩子' }}</h2>
@@ -190,9 +207,9 @@ async function confirmDelete() {
             <div class="stat-card"><span>累计浏览页面</span><strong>{{ totals.pages }}</strong></div>
           </div>
           <div v-if="loading" class="reader-loading"><div class="spinner" /></div>
-          <div v-else-if="recentSessions.length" class="recent-list">
-            <article v-for="session in recentSessions" :key="session.readingSessionId" class="recent-item">
-              <div><strong>{{ sessionTitle(session) }}</strong><p>浏览 {{ session.visitedPageNumbers.length }} 页 · {{ session.status }}</p></div>
+          <div v-else-if="sessions.length" class="recent-list">
+            <article v-for="session in sessions" :key="session.readingSessionId" class="recent-item">
+              <div><strong>{{ sessionTitle(session) }}</strong><p>{{ sessionRecordLabel(session) }} · 浏览 {{ session.visitedPageNumbers.length }} 页 · {{ session.status }}</p></div>
               <div class="recent-item-actions">
                 <span class="pill">修订 {{ session.revision }}</span>
                 <button class="danger" type="button" :disabled="deleteBusy" @click="askDeleteSession(session)">删除记录</button>

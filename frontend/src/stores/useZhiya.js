@@ -14,8 +14,10 @@ import {
 } from '../api/reading'
 import { previewBooks, mapApiBook } from '../data/preview'
 
-function parseRoute() {
-  const parts = location.hash.replace(/^#/, '').split('/').filter(Boolean)
+const CHILD_SESSION_KEY = 'zhiya.childHandoffSessionId'
+
+function parseRoute(hash = location.hash) {
+  const parts = hash.replace(/^#/, '').split('/').filter(Boolean)
   const name = parts[0] || 'home'
   if (name === 'account') return { name, section: parts[1] || 'overview' }
   if (name === 'child') return { name, sessionId: Number(parts[1]) || null }
@@ -41,6 +43,8 @@ const state = reactive({
     nickname: savedNickname,
   },
   profiles: [],
+  profilesLoading: false,
+  profilesError: '',
   activeProfileId: savedProfileId,
   books: previewBooks,
   booksSource: 'preview',
@@ -66,6 +70,7 @@ const state = reactive({
 
 let toastTimer = null
 let authEpoch = 0
+let profilesRequest = 0
 let booksRequest = 0
 let detailRequest = 0
 let sessionsRequest = 0
@@ -74,6 +79,8 @@ let pendingReading = null
 
 function clearAccountData() {
   state.profiles = []
+  state.profilesLoading = false
+  state.profilesError = ''
   state.activeProfileId = 0
   state.sessions = []
   state.currentBook = null
@@ -82,6 +89,10 @@ function clearAccountData() {
   state.currentReport = null
   state.bookFilters = { ageBand: '', topic: '' }
   state.selectedBookId = previewBooks[0].id
+  profilesRequest += 1
+  booksRequest += 1
+  sessionsRequest += 1
+  detailRequest += 1
   readingEpoch += 1
   state.sessionLoading = state.sessionBusy = state.sessionsLoading = state.detailLoading = state.booksLoading = false
   state.readingSyncRequired = false
@@ -89,6 +100,7 @@ function clearAccountData() {
   state.profileDeleteBusyId = null
   state.sessionDeleteBusyId = null
   pendingReading = null
+  sessionStorage.removeItem(CHILD_SESSION_KEY)
   for (const key of ['account', 'activeProfileId', 'selectedBookId', 'plan', 'guardianNickname']) {
     localStorage.removeItem(`zhiya.${key}`)
   }
@@ -122,6 +134,22 @@ function navigate(path) {
   } else {
     location.hash = target
   }
+}
+
+function replaceRoute(path) {
+  const hash = `#${String(path).replace(/^#/, '')}`
+  window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}${hash}`)
+  state.route = parseRoute(hash)
+  updateBodyView()
+}
+
+function savedChildSessionId() {
+  return Number(sessionStorage.getItem(CHILD_SESSION_KEY) || 0) || null
+}
+
+function rememberChildSession(sessionId) {
+  if (sessionId) sessionStorage.setItem(CHILD_SESSION_KEY, String(sessionId))
+  else sessionStorage.removeItem(CHILD_SESSION_KEY)
 }
 
 function updateBodyView() {
@@ -183,15 +211,26 @@ async function loadBooks(filters = {}) {
 
 async function loadProfiles() {
   const epoch = authEpoch
-  const items = await listProfiles()
-  if (epoch !== authEpoch) return []
-  state.profiles = items
-  if (!items.some((profile) => profile.childProfileId === state.activeProfileId)) {
-    state.activeProfileId = items[0]?.childProfileId || 0
+  const request = ++profilesRequest
+  const isCurrent = () => epoch === authEpoch && request === profilesRequest
+  state.profilesLoading = true
+  state.profilesError = ''
+  try {
+    const items = await listProfiles()
+    if (!isCurrent()) return []
+    state.profiles = items
+    if (!items.some((profile) => profile.childProfileId === state.activeProfileId)) {
+      state.activeProfileId = items[0]?.childProfileId || 0
+    }
+    if (state.activeProfileId) localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
+    else localStorage.removeItem('zhiya.activeProfileId')
+    return items
+  } catch (error) {
+    if (isCurrent()) state.profilesError = describeApiError(error)
+    throw error
+  } finally {
+    if (isCurrent()) state.profilesLoading = false
   }
-  if (state.activeProfileId) localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
-  else localStorage.removeItem('zhiya.activeProfileId')
-  return items
 }
 
 async function bootstrap() {
@@ -212,14 +251,27 @@ async function bootstrap() {
     await loadBooks()
   } catch (error) {
     if (epoch !== authEpoch) return
-    if (error instanceof ApiError && error.status === 403 && state.route.name === 'child') {
-      const restored = await restoreChildMode(state.route.sessionId)
-      if (restored) return
-    }
-    clearAccountData()
-    if (error instanceof ApiError && error.status === 401) {
-      state.auth.status = 'anonymous'
+    if (error?.status === 403) {
+      state.profiles = []
+      state.profilesError = ''
+      state.sessions = []
+      state.currentSession = null
+      state.currentBook = null
+      state.currentEvents = []
+      state.currentReport = null
+      state.auth = {
+        ...state.auth,
+        status: 'child',
+        authenticated: false,
+        role: 'CHILD',
+        accountId: null,
+      }
     } else {
+      clearAccountData()
+    }
+    if (error?.status === 401) {
+      state.auth.status = 'anonymous'
+    } else if (error?.status !== 403) {
       state.auth.status = 'unavailable'
       state.booksError = error.message || '后端暂不可用'
     }
@@ -307,32 +359,50 @@ async function editProfile(profileId, payload) {
 
 async function removeProfile(profileId) {
   if (state.profileDeleteBusyId !== null) return false
+  const epoch = authEpoch
   state.profileDeleteBusyId = profileId
   try {
     await deleteProfile(profileId)
+    if (epoch !== authEpoch) return false
+    state.profiles = state.profiles.filter((profile) => profile.childProfileId !== profileId)
+    state.sessions = []
     if (state.activeProfileId === profileId) {
       state.activeProfileId = 0
       state.currentSession = null
       state.currentBook = null
+      state.currentEvents = []
+      state.currentReport = null
       localStorage.removeItem('zhiya.activeProfileId')
     }
-    await loadProfiles()
+    let refreshFailed = false
+    try {
+      await loadProfiles()
+    } catch {
+      refreshFailed = true
+    }
     await loadSessions()
-    setToast('儿童档案及其关联阅读记录已删除')
+    setToast(
+      refreshFailed
+        ? '儿童档案已删除，但最新档案暂时未能重新读取，请稍后重试。'
+        : '儿童档案及其关联阅读记录已删除',
+      refreshFailed ? 'error' : 'info',
+    )
     return true
   } catch (error) {
-    setToast(describeApiError(error), 'error')
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
     return false
   } finally {
-    state.profileDeleteBusyId = null
+    if (epoch === authEpoch) state.profileDeleteBusyId = null
   }
 }
 
 async function removeReadingSession(sessionId) {
   if (state.sessionDeleteBusyId !== null) return false
+  const epoch = authEpoch
   state.sessionDeleteBusyId = sessionId
   try {
     await deleteReadingSession(sessionId)
+    if (epoch !== authEpoch) return false
     state.sessions = state.sessions.filter((session) => session.readingSessionId !== sessionId)
     if (state.currentSession?.readingSessionId === sessionId) {
       state.currentSession = null
@@ -343,10 +413,10 @@ async function removeReadingSession(sessionId) {
     setToast('阅读记录已删除')
     return true
   } catch (error) {
-    setToast(describeApiError(error), 'error')
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
     return false
   } finally {
-    state.sessionDeleteBusyId = null
+    if (epoch === authEpoch) state.sessionDeleteBusyId = null
   }
 }
 
@@ -498,6 +568,7 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
   if (!session || session.preview || session.readingSessionId !== sessionId || session.status !== 'CREATED' || state.sessionBusy) {
     return false
   }
+  const epoch = authEpoch
   state.sessionBusy = true
   try {
     const result = await updateReadingMode(sessionId, {
@@ -505,6 +576,7 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
       allowedStoryVersionIds,
       timeLimitSeconds,
     })
+    if (epoch !== authEpoch) return false
     state.currentSession = {
       ...session,
       mode: 'CHILD_SOLO',
@@ -514,9 +586,15 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
       sessionId,
       bookTitle: state.currentBook?.title || '',
       allowedStoryVersionIds: result.allowedStoryVersionIds,
+      allowedStoryVersionCount: result.allowedStoryVersionIds.length,
       expiresAt: result.expiresAt,
     }
+    rememberChildSession(sessionId)
+    profilesRequest += 1
+    booksRequest += 1
+    sessionsRequest += 1
     state.profiles = []
+    state.profilesError = ''
     state.sessions = []
     state.currentEvents = []
     state.currentReport = null
@@ -525,45 +603,62 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
     setToast('儿童阅读模式已开启，请交给儿童端继续')
     return true
   } catch (error) {
-    setToast(describeApiError(error), 'error')
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
     return false
   } finally {
-    state.sessionBusy = false
+    if (epoch === authEpoch) state.sessionBusy = false
   }
 }
 
 async function restoreChildMode(sessionId) {
-  if (!sessionId) return false
+  if (!sessionId || state.auth.status !== 'child') return false
+  const epoch = authEpoch
   state.sessionLoading = true
-  state.auth = { ...state.auth, status: 'child', authenticated: false, role: 'CHILD' }
   try {
     const detail = await getReadingSession(sessionId)
+    if (epoch !== authEpoch || state.auth.status !== 'child') return false
+    const version = await getStoryVersion(detail.session.storyVersionId)
+    if (epoch !== authEpoch || state.auth.status !== 'child') return false
     state.currentSession = detail.session
     state.currentEvents = detail.events || []
     state.currentReport = null
-    state.currentBook = mapApiBook(await getStoryVersion(detail.session.storyVersionId))
+    state.currentBook = mapApiBook(version)
     state.childMode = {
       sessionId,
       bookTitle: state.currentBook.title,
-      allowedStoryVersionIds: [detail.session.storyVersionId],
+      allowedStoryVersionIds: [],
+      allowedStoryVersionCount: null,
       expiresAt: detail.session.expiresAt,
     }
+    rememberChildSession(sessionId)
     return true
   } catch (error) {
-    state.childMode = null
-    setToast(describeApiError(error), 'error')
+    if (epoch === authEpoch && state.auth.status === 'child') {
+      state.childMode = null
+      setToast(describeApiError(error), 'error')
+    }
     return false
   } finally {
-    state.sessionLoading = false
+    if (epoch === authEpoch) state.sessionLoading = false
   }
 }
 
 async function unlockChildMode(account, password) {
   if (state.sessionBusy) return false
+  const epoch = authEpoch
   state.sessionBusy = true
   try {
     const result = await parentUnlock(account, password)
+    if (epoch !== authEpoch) return false
+    rememberChildSession(null)
     state.childMode = null
+    state.profiles = []
+    state.sessions = []
+    state.currentSession = null
+    state.currentBook = null
+    state.currentEvents = []
+    state.currentReport = null
+    state.profilesError = ''
     state.auth = {
       status: 'authenticated',
       authenticated: true,
@@ -572,17 +667,36 @@ async function unlockChildMode(account, password) {
       account,
       nickname: localStorage.getItem('zhiya.guardianNickname') || '知芽家长',
     }
-    await loadProfiles()
+    replaceRoute('account/overview')
+    setToast('家长身份已恢复，正在读取家长空间')
+    try {
+      await loadProfiles()
+    } catch {
+      setToast('家长身份已恢复，但儿童档案暂时未能读取，可在家长空间重试。', 'error')
+      return true
+    }
     await loadBooks()
-    navigate('account/overview')
-    setToast('已退出儿童模式并恢复家长空间')
+    await loadSessions()
+    if (epoch === authEpoch) setToast('已退出儿童模式并恢复家长空间')
     return true
-  } catch (error) {
-    setToast(describeApiError(error), 'error')
-    return false
   } finally {
-    state.sessionBusy = false
+    if (epoch === authEpoch) state.sessionBusy = false
   }
+}
+
+async function reloadAccountData() {
+  const epoch = authEpoch
+  try {
+    await loadProfiles()
+  } catch (error) {
+    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
+    return false
+  }
+  if (epoch !== authEpoch) return false
+  await loadBooks()
+  await loadSessions()
+  if (epoch === authEpoch) setToast('家长空间资料已重新读取')
+  return true
 }
 
 function applyReadingDetail(detail) {
@@ -760,6 +874,20 @@ async function loadSessions() {
 
 async function handleRoute() {
   updateBodyView()
+  if (state.auth.status === 'child') {
+    const sessionId = state.childMode?.sessionId || savedChildSessionId() || state.route.sessionId || null
+    if (
+      state.route.name !== 'child'
+      || (state.childMode?.sessionId && state.route.sessionId !== state.childMode.sessionId)
+    ) {
+      replaceRoute(sessionId ? `child/${sessionId}` : 'child')
+    }
+  } else if (state.auth.status === 'authenticated' && state.route.name === 'child') {
+    replaceRoute('account/overview')
+  } else if (state.auth.status === 'anonymous' && state.route.name === 'child') {
+    replaceRoute('auth')
+  }
+
   const route = state.route
   if (route.name === 'library') {
     if (state.auth.authenticated && state.booksSource !== 'api') await loadBooks()
@@ -768,7 +896,7 @@ async function handleRoute() {
   } else if (route.name === 'reader') {
     await loadReaderRoute()
   } else if (route.name === 'child') {
-    if (!state.childMode) await restoreChildMode(route.sessionId)
+    if (state.auth.status === 'child' && !state.childMode) await restoreChildMode(route.sessionId)
   } else if (route.name === 'account' && ['growth', 'overview'].includes(route.section)) {
     await loadSessions()
   }
@@ -797,6 +925,7 @@ export const zhiyaActions = {
   signUp,
   signOut,
   unlockChildMode,
+  reloadAccountData,
   selectProfile,
   addProfile,
   editProfile,

@@ -21,6 +21,7 @@ beforeEach(async () => {
   vi.resetAllMocks()
   vi.useFakeTimers()
   localStorage.clear()
+  sessionStorage.clear()
   window.history.replaceState({}, '', '/#reader/55')
   auth.login.mockResolvedValue({ data: { accountId: 1 } })
   auth.logout.mockResolvedValue(null)
@@ -262,6 +263,20 @@ describe('account isolation and logout', () => {
     expect(reading.deleteReadingSession).toHaveBeenCalledWith(55)
     expect(state.sessions).toEqual([])
   })
+
+  it('keeps a deleted profile removed when refreshing its list fails', async () => {
+    await actions.signIn('parent-a', 'password123')
+    profiles.listProfiles.mockRejectedValueOnce(new ApiError('服务暂不可用', {
+      status: 503,
+      code: 'DEPENDENCY_UNAVAILABLE',
+    }))
+    reading.listReadingSessions.mockResolvedValueOnce([])
+    expect(await actions.removeProfile(1)).toBe(true)
+    expect(state.profiles).toEqual([])
+    expect(state.activeProfileId).toBe(0)
+    expect(state.profilesError).toContain('服务暂不可用')
+    expect(state.toast.message).toContain('儿童档案已删除')
+  })
 })
 
 describe('child-mode handoff', () => {
@@ -288,6 +303,65 @@ describe('child-mode handoff', () => {
     expect(state.childMode).toBeNull()
     expect(state.auth.status).toBe('authenticated')
     expect(state.auth.authenticated).toBe(true)
+  })
+
+  it('keeps the child credential on the handoff when browser navigation changes the hash', async () => {
+    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
+    await actions.loadReaderRoute()
+    expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
+    window.history.replaceState({}, '', '/#library')
+    await actions.syncRoute()
+    expect(state.auth.status).toBe('child')
+    expect(state.route).toEqual({ name: 'child', sessionId: 55 })
+    expect(location.hash).toBe('#child/55')
+    expect(sessionStorage.getItem('zhiya.childHandoffSessionId')).toBe('55')
+  })
+
+  it('routes a guardian credential away from an old child handoff link', async () => {
+    await actions.signIn('parent-a', 'password123')
+    reading.getReadingSession.mockClear()
+    window.history.replaceState({}, '', '/#child/55')
+    await actions.syncRoute()
+    expect(state.auth.status).toBe('authenticated')
+    expect(state.route).toEqual({ name: 'account', section: 'overview' })
+    expect(location.hash).toBe('#account/overview')
+    expect(reading.getReadingSession).not.toHaveBeenCalled()
+  })
+
+  it('leaves the handoff as soon as unlock succeeds, even if profile refresh fails', async () => {
+    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
+    await actions.loadReaderRoute()
+    expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
+    profiles.listProfiles.mockRejectedValueOnce(new ApiError('服务暂不可用', {
+      status: 503,
+      code: 'DEPENDENCY_UNAVAILABLE',
+    }))
+    expect(await actions.unlockChildMode('parent-a', 'password123')).toBe(true)
+    expect(state.auth.status).toBe('authenticated')
+    expect(state.childMode).toBeNull()
+    expect(state.route).toEqual({ name: 'account', section: 'overview' })
+    expect(state.profilesError).toContain('服务暂不可用')
+    expect(auth.parentUnlock).toHaveBeenCalledTimes(1)
+
+    profiles.listProfiles.mockResolvedValueOnce([{ childProfileId: 1, nickname: '小芽' }])
+    expect(await actions.reloadAccountData()).toBe(true)
+    expect(state.profiles).toEqual([{ childProfileId: 1, nickname: '小芽' }])
+    expect(auth.parentUnlock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not claim an exact authorization count that cannot be restored', async () => {
+    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
+    await actions.loadReaderRoute()
+    reading.updateReadingMode.mockResolvedValueOnce({
+      mode: 'CHILD_SOLO',
+      childGrantId: 4,
+      allowedStoryVersionIds: [88, 99],
+      expiresAt: '2026-11-18T08:00:00Z',
+    })
+    expect(await actions.enterChildMode(55, [88, 99], 600)).toBe(true)
+    expect(state.childMode.allowedStoryVersionCount).toBe(2)
+    expect(await actions.restoreChildMode(55)).toBe(true)
+    expect(state.childMode.allowedStoryVersionCount).toBeNull()
   })
 })
 

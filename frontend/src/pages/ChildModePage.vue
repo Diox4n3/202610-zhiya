@@ -32,7 +32,8 @@ async function unlock() {
   error.value = ''
   unlocking.value = true
   try {
-    await props.unlockAction(account.value.trim(), password.value)
+    const unlocked = await props.unlockAction(account.value.trim(), password.value)
+    if (unlocked === false) error.value = '家长解锁失败，请检查账号和密码后重试。'
   } catch (reason) {
     error.value = describeApiError(reason)
   } finally {
@@ -53,11 +54,17 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <p class="eyebrow">儿童自主阅读模式</p>
       <h1>阅读空间已为孩子准备好</h1>
       <p v-if="book" class="child-handoff-book">当前绘本：{{ book.title }}</p>
-      <p>本次剩余：{{ remaining }} · 已授权 {{ childMode?.allowedStoryVersionIds?.length || 1 }} 个绘本版本</p>
+      <p>
+        本次剩余：{{ remaining }}
+        <template v-if="Number.isInteger(childMode?.allowedStoryVersionCount)">
+          · 已授权 {{ childMode.allowedStoryVersionCount }} 个绘本版本
+        </template>
+      </p>
       <div class="child-handoff-notice">
         这是桌面家长端的授权与交接页。儿童阅读交互由手机端或 4.3C 硬件端模块承接；本页面不会展示家长导航、档案或历史记录。
       </div>
-      <form class="child-handoff-unlock" @submit.prevent="unlock">
+      <p v-if="loading" class="child-handoff-loading" role="status">正在核对当前儿童授权的会话信息…</p>
+      <form v-else class="child-handoff-unlock" @submit.prevent="unlock">
         <h2>家长解锁</h2>
         <label class="form-field"><span>家长账号</span><input v-model="account" autocomplete="username"></label>
         <label class="form-field"><span>密码</span><input v-model="password" type="password" autocomplete="current-password"></label>

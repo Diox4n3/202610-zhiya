@@ -7,11 +7,16 @@ import HomePage from './HomePage.vue'
 import LibraryPage from './LibraryPage.vue'
 import ChildModePage from './ChildModePage.vue'
 import { mapApiBook } from '../data/preview'
+import { ApiError } from '../api/client'
 
 const wrappers = []
 const render = (component, props) => { const wrapper = mount(component, { props, global: { stubs: { BookCarousel: true } } }); wrappers.push(wrapper); return wrapper }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
-afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()); localStorage.clear() })
+afterEach(() => {
+  wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  localStorage.clear()
+  sessionStorage.clear()
+})
 
 describe('forms wait for completion', () => {
   it.each(['login', 'register'])('prevents duplicate %s and retains fields after failure', async (mode) => {
@@ -92,6 +97,48 @@ describe('forms wait for completion', () => {
     await flushPromises()
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
+
+  it('shows every history record and labels identical readings by record id', async () => {
+    const sessions = Array.from({ length: 5 }, (_, index) => ({
+      readingSessionId: 10 - index,
+      storyVersionId: 88,
+      visitedPageNumbers: [1],
+      status: 'FINISHED',
+      revision: 2,
+    }))
+    const wrapper = render(AccountPage, {
+      section: 'growth',
+      auth: { nickname: '家长', authenticated: true },
+      books: [{ storyVersionId: 88, title: '同一本绘本' }],
+      sessions,
+      totals: { read: 1, pages: 5, sessions: 5 },
+      saveProfileAction: vi.fn(),
+      deleteSessionAction: vi.fn().mockResolvedValue(true),
+    })
+    const deleteButtons = wrapper.findAll('button').filter((button) => button.text() === '删除记录')
+    expect(deleteButtons).toHaveLength(5)
+    expect(wrapper.text()).toContain('阅读记录 #10')
+    expect(wrapper.text()).toContain('阅读记录 #6')
+    await deleteButtons[4].trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('阅读记录 #6')
+  })
+
+  it('keeps refreshed profile data separate from a completed deletion', async () => {
+    const reload = vi.fn()
+    const wrapper = render(AccountPage, {
+      section: 'children',
+      auth: { nickname: '家长', authenticated: true },
+      profiles: [],
+      profilesError: '服务暂不可用，请稍后重试',
+      totals: { read: 0, pages: 0, sessions: 0 },
+      saveProfileAction: vi.fn(),
+      reloadAccountDataAction: reload,
+    })
+    expect(wrapper.get('[role="alert"]').text()).toContain('服务暂不可用')
+    expect(wrapper.findAll('button').find((button) => button.text() === '＋ 添加孩子').element.disabled).toBe(true)
+    await wrapper.findAll('button').find((button) => button.text() === '重新读取家长资料').trigger('click')
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('child-mode parent unlock', () => {
@@ -114,6 +161,33 @@ describe('child-mode parent unlock', () => {
     request.resolve(true)
     await flushPromises()
     expect(wrapper.get('.child-handoff-unlock button').element.disabled).toBe(false)
+  })
+
+  it('shows the backend reason when the guardian password is rejected', async () => {
+    const unlock = vi.fn().mockRejectedValue(new ApiError('账号或密码错误', {
+      status: 401,
+      code: 'INVALID_CREDENTIALS',
+    }))
+    const wrapper = render(ChildModePage, {
+      childMode: { sessionId: 9, allowedStoryVersionCount: 1, expiresAt: new Date(Date.now() + 600000).toISOString() },
+      auth: { account: 'parent-a' },
+      unlockAction: unlock,
+    })
+    const form = wrapper.get('.child-handoff-unlock')
+    await form.find('input[type="password"]').setValue('password123')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('账号或密码错误')
+  })
+
+  it('omits an unverifiable authorization count after restoring a handoff', () => {
+    const wrapper = render(ChildModePage, {
+      childMode: { sessionId: 9, allowedStoryVersionIds: [], allowedStoryVersionCount: null, expiresAt: null },
+      auth: { account: 'parent-a' },
+      unlockAction: vi.fn(),
+    })
+    expect(wrapper.text()).toContain('以儿童端显示为准')
+    expect(wrapper.text()).not.toContain('已授权')
   })
 })
 

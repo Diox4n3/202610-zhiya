@@ -127,6 +127,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :section="state.route.section"
       :auth="state.auth"
       :profiles="state.profiles"
+      :profiles-error="state.profilesError"
+      :profiles-loading="state.profilesLoading"
       :active-profile-id="state.activeProfileId"
       :sessions="state.sessions"
       :books="state.books"
@@ -137,6 +139,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :save-profile-action="handleProfileSave"
       :delete-profile-action="zhiyaActions.removeProfile"
       :delete-session-action="zhiyaActions.removeReadingSession"
+      :reload-account-data-action="zhiyaActions.reloadAccountData"
       @sign-out="zhiyaActions.signOut"
       @start="startBook"
     />
@@ -154,8 +157,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       @navigate="zhiyaActions.navigate"
     />
 
-    <div class="toast" :class="{ show: state.toast.visible, error: state.toast.tone === 'error' }" role="status">
-      {{ state.toast.message }}
-    </div>
+  </div>
+  <div class="toast" :class="{ show: state.toast.visible, error: state.toast.tone === 'error' }" role="status">
+    {{ state.toast.message }}
   </div>
 </template>
