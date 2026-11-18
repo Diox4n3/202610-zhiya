@@ -155,7 +155,7 @@ function sessionTitle(session) {
           <div class="stats-grid">
             <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ totals.sessions }}</strong></div>
             <div class="stat-card"><span>读过绘本版本</span><strong>{{ totals.read }}</strong></div>
-            <div class="stat-card"><span>累计浏览页面</span><strong>{{ totals.minutes }}</strong></div>
+            <div class="stat-card"><span>累计浏览页面</span><strong>{{ totals.pages }}</strong></div>
           </div>
           <div v-if="loading" class="reader-loading"><div class="spinner" /></div>
           <div v-else-if="recentSessions.length" class="recent-list">
@@ -211,9 +211,9 @@ function sessionTitle(session) {
             <div class="hero-illustration"><img src="/assets/reader-scene.svg" alt=""></div>
           </section>
           <div class="stats-grid">
-            <div class="stat-card"><span>阅读会话</span><strong>{{ totals.sessions }}</strong></div>
+            <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ totals.sessions }}</strong></div>
             <div class="stat-card"><span>访问绘本</span><strong>{{ totals.read }}</strong></div>
-            <div class="stat-card"><span>浏览页面</span><strong>{{ totals.minutes }}</strong></div>
+            <div class="stat-card"><span>浏览页面</span><strong>{{ totals.pages }}</strong></div>
             <div class="stat-card"><span>当前档案</span><strong>{{ activeProfile ? '已选择' : '待添加' }}</strong></div>
           </div>
           <section class="account-card">

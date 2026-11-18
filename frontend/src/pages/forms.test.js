@@ -34,7 +34,7 @@ describe('forms wait for completion', () => {
   it('keeps profile editor open while saving and on error, then closes on success', async () => {
     const request = deferred()
     const save = vi.fn().mockReturnValueOnce(request.promise).mockResolvedValueOnce({ childProfileId: 2 })
-    const wrapper = render(AccountPage, { section: 'children', auth: { nickname: '家长' }, totals: { read: 0, minutes: 0, sessions: 0 }, saveProfileAction: save })
+    const wrapper = render(AccountPage, { section: 'children', auth: { nickname: '家长' }, totals: { read: 0, pages: 0, sessions: 0 }, saveProfileAction: save })
     await wrapper.findAll('button').find((button) => button.text() === '添加孩子').trigger('click')
     await wrapper.find('form input').setValue('小芽')
     await wrapper.find('form').trigger('submit')

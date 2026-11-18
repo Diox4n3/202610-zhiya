@@ -75,8 +75,12 @@ describe('authoritative reading progress', () => {
     expect(reading.addReadingEvent).toHaveBeenCalledTimes(1)
   })
 
-  it('locks new writes when outcome is unknown; explicit confirmation reuses the exact key and body', async () => {
-    reading.addReadingEvent.mockRejectedValueOnce(new ApiError('timeout', { status: 504, code: 'REQUEST_OUTCOME_UNKNOWN' }))
+  it.each([
+    [0, 'REQUEST_OUTCOME_UNKNOWN'],
+    [409, 'REQUEST_IN_PROGRESS'],
+    [504, 'REQUEST_FAILED'],
+  ])('reuses the exact original write after a transport error or pending response (%s/%s)', async (status, code) => {
+    reading.addReadingEvent.mockRejectedValueOnce(new ApiError('pending', { status, code }))
     reading.getReadingSession.mockRejectedValueOnce(new Error('offline'))
     await actions.recordPageChange(3)
     const original = structuredClone(reading.addReadingEvent.mock.calls[0][1])
@@ -90,6 +94,48 @@ describe('authoritative reading progress', () => {
     expect(reading.addReadingEvent.mock.calls[1][1]).toEqual(original)
     expect(state.currentSession.currentPage).toBe(3)
     expect(state.readingSyncRequired).toBe(false)
+  })
+
+  it('reads back a terminal 504 and creates a different event only on the next user action', async () => {
+    reading.addReadingEvent.mockRejectedValueOnce(new ApiError('unknown', { status: 504, code: 'REQUEST_OUTCOME_UNKNOWN' }))
+    expect(await actions.recordPageChange(3)).toBe(false)
+    expect(state.currentSession.currentPage).toBe(1)
+    expect(state.readingSyncRequired).toBe(false)
+    expect(reading.addReadingEvent).toHaveBeenCalledTimes(1)
+    const original = reading.addReadingEvent.mock.calls[0][1]
+    expect(await actions.recordPageChange(3)).toBe(true)
+    const next = reading.addReadingEvent.mock.calls[1][1]
+    expect(next.expectedRevision).toBe(original.expectedRevision)
+    expect(next.clientEventId).not.toBe(original.clientEventId)
+    expect(state.currentSession.currentPage).toBe(3)
+  })
+
+  it('keeps writes locked until the read after a terminal 504 succeeds, without replaying the old key', async () => {
+    reading.completeReadingSession.mockRejectedValueOnce(new ApiError('unknown', { status: 504, code: 'REQUEST_OUTCOME_UNKNOWN' }))
+    reading.getReadingSession.mockRejectedValueOnce(new Error('offline'))
+    expect(await actions.completeReading()).toBe(false)
+    expect(state.readingSyncRequired).toBe(true)
+    expect(await actions.recordPageChange(3)).toBe(false)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(await actions.refreshReading()).toBe(true)
+    expect(state.readingSyncRequired).toBe(false)
+    expect(reading.completeReadingSession).toHaveBeenCalledTimes(1)
+    expect(reading.addReadingEvent).not.toHaveBeenCalled()
+  })
+
+  it.each(['READY', 'FAILED'])('reads an updated %s report without submitting completion again', async (status) => {
+    const finished = detail({ status: 'FINISHED', revision: 2 })
+    reading.completeReadingSession.mockResolvedValueOnce({ ...finished, report: { status: 'PENDING', summary: '事实摘要' } })
+    expect(await actions.completeReading()).toBe(true)
+    const report = { status, summary: status === 'READY' ? '最终小结' : '事实摘要' }
+    reading.getReadingSession.mockRejectedValueOnce(new Error('离线')).mockResolvedValueOnce({ ...finished, report })
+    expect(await actions.refreshReading()).toBe(false)
+    expect(state.currentReport.status).toBe('PENDING')
+    expect(state.readingSyncRequired).toBe(false)
+    expect(await actions.refreshReading()).toBe(true)
+    expect(state.currentReport).toEqual(report)
+    expect(reading.completeReadingSession).toHaveBeenCalledTimes(1)
+    expect(reading.addReadingEvent).not.toHaveBeenCalled()
   })
 
   it('handles completion conflicts using the same refresh path', async () => {
@@ -123,6 +169,18 @@ describe('authoritative reading progress', () => {
 })
 
 describe('account isolation and logout', () => {
+  it('keeps a late success from restoring details after the latest request received a 404', async () => {
+    window.history.replaceState({}, '', '/#detail/88')
+    const first = deferred()
+    books.getStoryVersion.mockReturnValueOnce(first.promise)
+    const stale = actions.loadDetail(88)
+    books.getStoryVersion.mockRejectedValueOnce(new ApiError('资源不可用', { status: 404 }))
+    await actions.loadDetail(88)
+    first.resolve(version)
+    await stale
+    expect(state.currentBook).toBeNull()
+  })
+
   it('retains an honest authentication state and explicit message when logout fails', async () => {
     await actions.signIn('parent-a', 'password123')
     auth.logout.mockRejectedValueOnce(new Error('offline'))
@@ -178,5 +236,35 @@ describe('account isolation and logout', () => {
     pending.resolve(detail({ readingSessionId: 99 }))
     await loading
     expect(state.currentSession).toBeNull()
+  })
+})
+
+describe('growth statistics', () => {
+  it('counts actual visits and only in-progress or finished sessions', async () => {
+    await actions.signIn('parent-a', 'password123')
+    const { totals } = await import('./useZhiya')
+    const created = session({ readingSessionId: 1, status: 'CREATED', visitedPageNumbers: [] })
+    reading.listReadingSessions.mockResolvedValueOnce([created])
+    await actions.loadSessions()
+    expect(totals.value).toEqual({ sessions: 0, read: 0, pages: 0 })
+    reading.listReadingSessions.mockResolvedValueOnce([
+      created, session({ readingSessionId: 2, visitedPageNumbers: [1, 3] }),
+      session({ readingSessionId: 3, status: 'FINISHED', visitedPageNumbers: [1, 3, 7] }),
+      session({ readingSessionId: 4, storyVersionId: 99, status: 'INTERRUPTED', visitedPageNumbers: [1] }),
+    ])
+    await actions.loadSessions()
+    expect(totals.value).toEqual({ sessions: 2, read: 2, pages: 6 })
+  })
+
+  it('includes later pages and counts a session only once when paginated history overlaps', async () => {
+    await actions.signIn('parent-a', 'password123')
+    const { totals } = await import('./useZhiya')
+    const first = Array.from({ length: 50 }, (_, index) => session({ readingSessionId: 60 - index }))
+    reading.listReadingSessions.mockResolvedValueOnce(first).mockResolvedValueOnce([
+      first.at(-1), session({ readingSessionId: 10, storyVersionId: 99 }),
+    ])
+    await actions.loadSessions()
+    expect(reading.listReadingSessions.mock.calls).toEqual([[1, 50], [2, 50]])
+    expect(totals.value).toEqual({ sessions: 51, read: 2, pages: 51 })
   })
 })

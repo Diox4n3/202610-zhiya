@@ -60,6 +60,8 @@ const state = reactive({
 let toastTimer = null
 let authEpoch = 0
 let booksRequest = 0
+let detailRequest = 0
+let sessionsRequest = 0
 let readingEpoch = 0
 let pendingReading = null
 
@@ -299,7 +301,9 @@ function openDetail(bookOrVersionId) {
 
 async function loadDetail(versionId) {
   const epoch = authEpoch
+  const request = ++detailRequest
   const route = location.hash
+  const isCurrent = () => epoch === authEpoch && request === detailRequest && route === location.hash
   state.detailLoading = true
   state.currentBook = null
   try {
@@ -309,12 +313,17 @@ async function loadDetail(versionId) {
       return
     }
     const version = await getStoryVersion(Number(versionId))
-    if (epoch !== authEpoch || route !== location.hash) return
+    if (!isCurrent()) return
     state.currentBook = mapApiBook(version)
   } catch (error) {
-    if (epoch === authEpoch && route === location.hash) setToast(describeApiError(error), 'error')
+    if (!isCurrent()) return
+    if (error.status === 404 && state.booksSource === 'api') {
+      applyBooks(state.books.filter((book) => book.storyVersionId !== Number(versionId)), 'api')
+      if (state.booksLoading) void loadBooks()
+    }
+    setToast(describeApiError(error), 'error')
   } finally {
-    if (epoch === authEpoch && route === location.hash) state.detailLoading = false
+    if (isCurrent()) state.detailLoading = false
   }
 }
 
@@ -450,25 +459,29 @@ async function writeReading(operation) {
     return true
   } catch (error) {
     if (!sameReading(operation, epoch, generation)) return false
-    const unknown = ['REQUEST_OUTCOME_UNKNOWN', 'REQUEST_IN_PROGRESS'].includes(error.code) || error.status === 0 || error.status === 504
-    pendingReading = unknown ? { ...operation, retryAt: Date.now() + (Number(error.retryAfter) || 1) * 1000 } : null
-    state.readingSyncRequired = unknown || error.status === 409
+    const terminalUnknown = error.status === 504 && error.code === 'REQUEST_OUTCOME_UNKNOWN'
+    const retrySameKey = error.status === 0 || error.code === 'REQUEST_IN_PROGRESS' || (error.status === 504 && !terminalUnknown)
+    pendingReading = retrySameKey ? { ...operation, retryAt: Date.now() + (Number(error.retryAfter) || 1) * 1000 } : null
+    state.readingSyncRequired = retrySameKey || terminalUnknown || error.status === 409
     if (state.readingSyncRequired) {
       try {
         const detail = await getReadingSession(operation.sessionId)
         if (!sameReading(operation, epoch, generation)) return false
         applyReadingDetail(detail)
-        // A changed revision makes any still-running old write stale. Otherwise
-        // retain its original id/body until the user explicitly confirms it.
-        if (!unknown || detail.session.revision !== operation.payload.expectedRevision) {
+        if (!pendingReading || detail.session.revision !== operation.payload.expectedRevision) {
           pendingReading = null
           state.readingSyncRequired = false
         }
       } catch {
         // Keep writes disabled until the authoritative session can be read.
+        if (!sameReading(operation, epoch, generation)) return false
       }
     }
-    setToast(`${describeApiError(error)}${state.readingSyncRequired ? ' 请使用“确认并同步进度”。' : ''}`, 'error')
+    if (terminalUnknown && !state.readingSyncRequired) {
+      setToast('已按服务器记录同步进度，请根据当前页面决定是否继续。')
+    } else {
+      setToast(`${describeApiError(error)}${state.readingSyncRequired ? ' 请使用“确认并同步进度”。' : ''}`, 'error')
+    }
     return false
   } finally {
     if (sameReading(operation, epoch, generation)) state.sessionBusy = false
@@ -480,14 +493,18 @@ async function refreshReading() {
   if (!session || session.preview || state.sessionBusy) return false
   const epoch = authEpoch
   const generation = readingEpoch
-  const operation = pendingReading
   const target = { sessionId: session.readingSessionId }
   state.sessionBusy = true
   try {
     const detail = await getReadingSession(target.sessionId)
     if (!sameReading(target, epoch, generation)) return false
+    if (session.status === 'FINISHED' && !state.readingSyncRequired) {
+      state.currentReport = detail.report
+      return true
+    }
     applyReadingDetail(detail)
-    if (operation && detail.session.revision === operation.payload.expectedRevision) {
+    const operation = pendingReading
+    if (operation && ['CREATED', 'IN_PROGRESS'].includes(detail.session.status) && detail.session.revision === operation.payload.expectedRevision) {
       if (Date.now() < operation.retryAt) {
         setToast('原请求仍在处理，请稍后再次确认。', 'error')
         return false
@@ -499,10 +516,7 @@ async function refreshReading() {
     state.readingSyncRequired = false
     return true
   } catch (error) {
-    if (sameReading(target, epoch, generation)) {
-      state.readingSyncRequired = true
-      setToast(describeApiError(error), 'error')
-    }
+    if (sameReading(target, epoch, generation)) setToast(describeApiError(error), 'error')
     return false
   } finally {
     if (sameReading(target, epoch, generation)) state.sessionBusy = false
@@ -558,18 +572,27 @@ async function completeReading() {
 
 async function loadSessions() {
   const epoch = authEpoch
+  const request = ++sessionsRequest
+  const isCurrent = () => epoch === authEpoch && request === sessionsRequest
   if (!state.auth.authenticated) {
     state.sessions = []
     return
   }
   state.sessionsLoading = true
   try {
-    const sessions = await listReadingSessions()
-    if (epoch === authEpoch) state.sessions = sessions
+    const sessions = new Map()
+    const pageSize = 50
+    for (let page = 1; ; page += 1) {
+      const items = await listReadingSessions(page, pageSize)
+      if (!isCurrent()) return
+      for (const session of items) sessions.set(session.readingSessionId, session)
+      if (items.length < pageSize) break
+    }
+    state.sessions = [...sessions.values()]
   } catch (error) {
-    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
+    if (isCurrent()) setToast(describeApiError(error), 'error')
   } finally {
-    if (epoch === authEpoch) state.sessionsLoading = false
+    if (isCurrent()) state.sessionsLoading = false
   }
 }
 
@@ -582,7 +605,7 @@ async function handleRoute() {
     await loadDetail(route.versionId)
   } else if (route.name === 'reader') {
     await loadReaderRoute()
-  } else if (route.name === 'account') {
+  } else if (route.name === 'account' && ['growth', 'overview'].includes(route.section)) {
     await loadSessions()
   }
 }
@@ -593,9 +616,12 @@ function syncRoute() {
 }
 
 const totals = computed(() => {
-  const read = new Set(state.sessions.map((item) => item.storyVersionId)).size
-  const minutes = state.sessions.reduce((sum, item) => sum + Math.max(1, item.visitedPageNumbers?.length || 1), 0)
-  return { read, minutes, sessions: state.sessions.length }
+  const visited = state.sessions.filter((session) => session.visitedPageNumbers?.length)
+  return {
+    sessions: state.sessions.filter((session) => ['IN_PROGRESS', 'FINISHED'].includes(session.status)).length,
+    read: new Set(visited.map((session) => session.storyVersionId)).size,
+    pages: visited.reduce((sum, session) => sum + session.visitedPageNumbers.length, 0),
+  }
 })
 
 export const zhiya = readonly(state)

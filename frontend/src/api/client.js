@@ -67,7 +67,6 @@ export async function apiRequest(path, options = {}) {
     if (error instanceof ApiError || signal?.aborted) throw error
     const read = ['GET', 'HEAD'].includes(method)
     throw new ApiError(controller.signal.aborted ? '请求超时' : '无法确认请求结果，请检查网络', {
-      status: controller.signal.aborted ? 504 : 0,
       code: read ? 'REQUEST_FAILED' : 'REQUEST_OUTCOME_UNKNOWN',
       retryable: read,
     })

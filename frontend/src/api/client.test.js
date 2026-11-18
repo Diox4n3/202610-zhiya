@@ -28,10 +28,18 @@ describe('API contract', () => {
     vi.useFakeTimers()
     const fetch = vi.fn((url, options) => new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))))
     vi.stubGlobal('fetch', fetch)
-    const check = expect(apiRequest('/reading-sessions/1/events', { method, timeoutMs: 50 })).rejects.toMatchObject({ status: 504, code: method === 'GET' ? 'REQUEST_FAILED' : 'REQUEST_OUTCOME_UNKNOWN', retryable: method === 'GET' })
+    const check = expect(apiRequest('/reading-sessions/1/events', { method, timeoutMs: 50 })).rejects.toMatchObject({ status: 0, code: method === 'GET' ? 'REQUEST_FAILED' : 'REQUEST_OUTCOME_UNKNOWN', retryable: method === 'GET' })
     await vi.advanceTimersByTimeAsync(50)
     await check
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a server-confirmed 504 distinct from a client timeout', async () => {
+    const response = Response.json({ error: { code: 'REQUEST_OUTCOME_UNKNOWN' } }, { status: 504 })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    await expect(apiRequest('/reading-sessions/1/events', { method: 'POST' })).rejects.toMatchObject({
+      status: 504, code: 'REQUEST_OUTCOME_UNKNOWN',
+    })
   })
 
   it('preserves server Retry-After and distinguishes result unknown', async () => {

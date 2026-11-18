@@ -13,12 +13,9 @@ const state = zhiya
 const selectedBook = computed(() =>
   state.books.find((book) => book.id === state.selectedBookId) || state.books[0] || null,
 )
-const detailBook = computed(() => {
-  if (state.route.name !== 'detail' || !state.route.versionId) return null
-  return state.currentBook?.storyVersionId === state.route.versionId
-    ? state.currentBook
-    : state.books.find((book) => book.storyVersionId === state.route.versionId) || state.currentBook
-})
+const detailBook = computed(() =>
+  state.currentBook?.storyVersionId === state.route.versionId ? state.currentBook : null,
+)
 
 async function handleProfileSave({ id, payload }) {
   if (id) return zhiyaActions.editProfile(id, payload)
@@ -110,6 +107,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :complete-reading="zhiyaActions.completeReading"
       :refresh-reading="zhiyaActions.refreshReading"
       @back="openDetail"
+      @library="zhiyaActions.navigate('library')"
+      @start-session="zhiyaActions.loadReaderRoute"
     />
     <AccountPage
       v-else-if="state.route.name === 'account'"

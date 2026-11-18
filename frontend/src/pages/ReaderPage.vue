@@ -16,7 +16,7 @@ const props = defineProps({
   refreshReading: { type: Function, required: true },
 })
 
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'library', 'start-session'])
 const flipBook = ref(null)
 const pageIndex = ref(0)
 const turnBusy = ref(false)
@@ -290,9 +290,13 @@ function leaveReader() {
 
 async function refreshProgress() {
   if (turnBusy.value) return
+  const syncingProgress = props.syncRequired
   turnBusy.value = true
   try { await props.refreshReading() } catch (error) { audioMessage.value = describeApiError(error) }
-  finally { showPage(props.session?.currentPage); turnBusy.value = false }
+  finally {
+    if (syncingProgress) showPage(props.session?.currentPage)
+    turnBusy.value = false
+  }
 }
 
 watch(() => [props.session?.readingSessionId, props.session?.currentPage, props.session?.revision, props.session?.status, props.authenticated, props.loading, props.syncRequired], () => {
@@ -314,6 +318,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
         <p>第 {{ currentPage?.pageNumber }} 页 · 共 {{ book.pageCount }} 页 · {{ session.preview ? '本地预览' : syncRequired ? '进度待确认' : turnBusy ? '正在同步进度' : rereading ? `回看已读页，服务端进度为第 ${session.currentPage} 页` : '后端会话已同步' }}</p>
         <p v-if="rereading">回看期间仅阅读文字和插图；返回当前进度后可继续朗读与录音。</p>
         <button v-if="syncRequired" class="secondary" type="button" :disabled="turnBusy" @click="refreshProgress">确认并同步进度</button>
+        <button v-else-if="session.status === 'CREATED'" class="primary" type="button" @click="emit('start-session')">开始本次阅读</button>
       </div>
       <span class="pill">{{ report ? '本次阅读已完成' : '亲子共读模式' }}</span>
     </div>
@@ -337,7 +342,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
           <button class="dock-button" type="button" :disabled="pageIndex === 0 || turnBusy || syncRequired" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
           <button class="dock-button" type="button" :disabled="!mediaAllowed" @click="playNarration"><span class="dock-glyph">{{ audioStatus === 'playing' ? 'Ⅱ' : '▶' }}</span>{{ audioStatus === 'playing' ? '暂停朗读' : audioStatus === 'loading' ? '取消朗读' : '朗读' }}</button>
           <button class="dock-button primary" type="button" :disabled="!mediaAllowed" @click="openVoice"><span class="dock-glyph">芽</span>语音识别</button>
-          <button class="dock-button" type="button" :disabled="turnBusy || syncRequired || (isLast && session.status !== 'IN_PROGRESS')" @click="goNext"><span class="dock-glyph">{{ isLast ? '✓' : '›' }}</span>{{ isLast ? '完成' : '下一页' }}</button>
+          <button class="dock-button" type="button" :disabled="turnBusy || syncRequired || session.status === 'CREATED' || (isLast && session.status !== 'IN_PROGRESS')" @click="goNext"><span class="dock-glyph">{{ isLast ? '✓' : '›' }}</span>{{ isLast ? '完成' : '下一页' }}</button>
         </nav>
       </section>
 
@@ -360,7 +365,11 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
         </section>
         <section v-if="report" class="side-card">
           <h2>本次共读小结</h2>
+          <p v-if="report.status === 'PENDING'" role="status">小结正在生成，以下是已保存的阅读记录。</p>
+          <p v-else-if="report.status === 'FAILED'" role="status">小结生成失败，已保留本次阅读记录。</p>
+          <p v-else-if="report.status === 'READY'" role="status">小结已生成。</p>
           <p class="address">{{ report.summary }}</p>
+          <button v-if="report.status === 'PENDING'" class="secondary" type="button" :disabled="turnBusy" @click="refreshProgress">刷新小结</button>
         </section>
       </aside>
     </div>
@@ -385,6 +394,6 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
     </div>
   </main>
   <main v-else class="reader-page page-width">
-    <div class="empty-state"><div><h2>阅读会话暂时不可用</h2><p>请返回绘本馆，登录并重新开始阅读。</p><button class="primary" type="button" @click="emit('back')">返回绘本馆</button></div></div>
+    <div class="empty-state"><div><h2>阅读会话暂时不可用</h2><p>请返回绘本馆，登录并重新开始阅读。</p><button class="primary" type="button" @click="emit('library')">返回绘本馆</button></div></div>
   </main>
 </template>

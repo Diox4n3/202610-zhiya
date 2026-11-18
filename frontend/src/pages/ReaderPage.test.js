@@ -161,6 +161,37 @@ describe('narration lifecycle', () => {
 })
 
 describe('reader state and visual progress', () => {
+  it.each(['READY', 'FAILED'])('shows the pending facts and refreshes a %s report in place', async (status) => {
+    const refreshReading = vi.fn()
+    const completeReading = vi.fn()
+    render({
+      session: { ...initialSession, status: 'FINISHED' },
+      report: { status: 'PENDING', summary: '事实摘要' }, refreshReading, completeReading,
+    })
+    expect(wrapper.text()).toContain('小结正在生成')
+    expect(wrapper.text()).toContain('事实摘要')
+    await button('刷新小结').trigger('click')
+    expect(refreshReading).toHaveBeenCalledTimes(1)
+    expect(completeReading).not.toHaveBeenCalled()
+    const summary = status === 'READY' ? '最终小结' : '事实摘要'
+    await wrapper.setProps({ report: { status, summary } })
+    expect(wrapper.text()).toContain(status === 'READY' ? '小结已生成' : '小结生成失败')
+    expect(wrapper.text()).toContain(summary)
+    expect(button('刷新小结')).toBeUndefined()
+  })
+
+  it('keeps the displayed page during a report-only refresh', async () => {
+    render({
+      session: { ...initialSession, status: 'FINISHED', currentPage: 3, visitedPageNumbers: [1, 3] },
+      report: { status: 'PENDING', summary: '事实摘要' },
+    })
+    await button('上一页').trigger('click')
+    expect(showPage).toHaveBeenLastCalledWith(0)
+    await button('刷新小结').trigger('click')
+    await flushPromises()
+    expect(showPage).toHaveBeenLastCalledWith(0)
+  })
+
   it('waits for a confirmed page and rejects a second gesture during the write', async () => {
     const pending = deferred()
     const record = vi.fn().mockReturnValue(pending.promise)
