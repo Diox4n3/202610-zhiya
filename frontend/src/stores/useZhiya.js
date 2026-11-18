@@ -1,14 +1,16 @@
 import { computed, reactive, readonly } from 'vue'
 import { ApiError, createClientEventId, describeApiError } from '../api/client'
-import { checkHealth, login, logout, register } from '../api/auth'
-import { createProfile, listProfiles, updateProfile } from '../api/profiles'
+import { checkHealth, login, logout, parentUnlock, register } from '../api/auth'
+import { createProfile, deleteProfile, listProfiles, updateProfile } from '../api/profiles'
 import { getStoryVersion, listStorybooks } from '../api/storybooks'
 import {
   addReadingEvent,
   completeReadingSession,
   createReadingSession,
+  deleteReadingSession,
   getReadingSession,
   listReadingSessions,
+  updateReadingMode,
 } from '../api/reading'
 import { previewBooks, mapApiBook } from '../data/preview'
 
@@ -16,6 +18,7 @@ function parseRoute() {
   const parts = location.hash.replace(/^#/, '').split('/').filter(Boolean)
   const name = parts[0] || 'home'
   if (name === 'account') return { name, section: parts[1] || 'overview' }
+  if (name === 'child') return { name, sessionId: Number(parts[1]) || null }
   if (name === 'detail') return { name, versionId: Number(parts[1]) || null }
   if (name === 'reader' && parts[1] === 'preview') return { name, previewVersionId: Number(parts[2]) || null }
   if (name === 'reader') return { name, sessionId: Number(parts[1]) || null }
@@ -32,6 +35,7 @@ const state = reactive({
   auth: {
     status: 'checking',
     authenticated: false,
+    role: 'GUARDIAN',
     accountId: null,
     account: localStorage.getItem('zhiya.account') || '',
     nickname: savedNickname,
@@ -51,6 +55,9 @@ const state = reactive({
   currentReport: null,
   sessionLoading: false,
   sessionBusy: false,
+  profileDeleteBusyId: null,
+  sessionDeleteBusyId: null,
+  childMode: null,
   readingSyncRequired: false,
   sessions: [],
   sessionsLoading: false,
@@ -78,6 +85,9 @@ function clearAccountData() {
   readingEpoch += 1
   state.sessionLoading = state.sessionBusy = state.sessionsLoading = state.detailLoading = state.booksLoading = false
   state.readingSyncRequired = false
+  state.childMode = null
+  state.profileDeleteBusyId = null
+  state.sessionDeleteBusyId = null
   pendingReading = null
   for (const key of ['account', 'activeProfileId', 'selectedBookId', 'plan', 'guardianNickname']) {
     localStorage.removeItem(`zhiya.${key}`)
@@ -88,7 +98,7 @@ function clearAccountData() {
 function resetAuthentication() {
   authEpoch += 1
   clearAccountData()
-  state.auth = { status: 'anonymous', authenticated: false, accountId: null, account: '', nickname: '知芽家长' }
+  state.auth = { status: 'anonymous', authenticated: false, role: 'GUARDIAN', accountId: null, account: '', nickname: '知芽家长' }
 }
 
 function activeProfile() {
@@ -179,7 +189,8 @@ async function loadProfiles() {
   if (!items.some((profile) => profile.childProfileId === state.activeProfileId)) {
     state.activeProfileId = items[0]?.childProfileId || 0
   }
-  localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
+  if (state.activeProfileId) localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
+  else localStorage.removeItem('zhiya.activeProfileId')
   return items
 }
 
@@ -197,9 +208,14 @@ async function bootstrap() {
     if (epoch !== authEpoch) return
     state.auth.status = 'authenticated'
     state.auth.authenticated = true
+    state.auth.role = 'GUARDIAN'
     await loadBooks()
   } catch (error) {
     if (epoch !== authEpoch) return
+    if (error instanceof ApiError && error.status === 403 && state.route.name === 'child') {
+      const restored = await restoreChildMode(state.route.sessionId)
+      if (restored) return
+    }
     clearAccountData()
     if (error instanceof ApiError && error.status === 401) {
       state.auth.status = 'anonymous'
@@ -222,6 +238,7 @@ async function signIn(account, password) {
   state.auth.account = account
   state.auth.authenticated = true
   state.auth.status = 'authenticated'
+  state.auth.role = 'GUARDIAN'
   localStorage.setItem('zhiya.account', account)
   await loadProfiles()
   await loadBooks()
@@ -286,6 +303,51 @@ async function editProfile(profileId, payload) {
   if (epoch !== authEpoch) return
   setToast('儿童档案已更新')
   return profile
+}
+
+async function removeProfile(profileId) {
+  if (state.profileDeleteBusyId !== null) return false
+  state.profileDeleteBusyId = profileId
+  try {
+    await deleteProfile(profileId)
+    if (state.activeProfileId === profileId) {
+      state.activeProfileId = 0
+      state.currentSession = null
+      state.currentBook = null
+      localStorage.removeItem('zhiya.activeProfileId')
+    }
+    await loadProfiles()
+    await loadSessions()
+    setToast('儿童档案及其关联阅读记录已删除')
+    return true
+  } catch (error) {
+    setToast(describeApiError(error), 'error')
+    return false
+  } finally {
+    state.profileDeleteBusyId = null
+  }
+}
+
+async function removeReadingSession(sessionId) {
+  if (state.sessionDeleteBusyId !== null) return false
+  state.sessionDeleteBusyId = sessionId
+  try {
+    await deleteReadingSession(sessionId)
+    state.sessions = state.sessions.filter((session) => session.readingSessionId !== sessionId)
+    if (state.currentSession?.readingSessionId === sessionId) {
+      state.currentSession = null
+      state.currentBook = null
+      state.currentEvents = []
+      state.currentReport = null
+    }
+    setToast('阅读记录已删除')
+    return true
+  } catch (error) {
+    setToast(describeApiError(error), 'error')
+    return false
+  } finally {
+    state.sessionDeleteBusyId = null
+  }
 }
 
 function selectBook(bookId) {
@@ -406,13 +468,6 @@ async function loadReaderRoute() {
     if (!isCurrent()) return
     applyReadingDetail(detail)
     state.currentBook = book
-    if (detail.session.status === 'CREATED') {
-      await writeReading({
-        sessionId: detail.session.readingSessionId,
-        kind: 'page',
-        payload: { eventType: 'STARTED', pageNumber: 1, expectedRevision: detail.session.revision, clientEventId: createClientEventId('start') },
-      })
-    }
   } catch (error) {
     if (isCurrent()) {
       setToast(describeApiError(error), 'error')
@@ -420,6 +475,113 @@ async function loadReaderRoute() {
     }
   } finally {
     if (isCurrent()) state.sessionLoading = false
+  }
+}
+
+async function startCurrentReading() {
+  const session = state.currentSession
+  if (!session || session.preview || session.status !== 'CREATED' || state.sessionBusy) return false
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'page',
+    payload: {
+      eventType: 'STARTED',
+      pageNumber: 1,
+      expectedRevision: session.revision,
+      clientEventId: createClientEventId('start'),
+    },
+  })
+}
+
+async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSeconds) {
+  const session = state.currentSession
+  if (!session || session.preview || session.readingSessionId !== sessionId || session.status !== 'CREATED' || state.sessionBusy) {
+    return false
+  }
+  state.sessionBusy = true
+  try {
+    const result = await updateReadingMode(sessionId, {
+      mode: 'CHILD_SOLO',
+      allowedStoryVersionIds,
+      timeLimitSeconds,
+    })
+    state.currentSession = {
+      ...session,
+      mode: 'CHILD_SOLO',
+      expiresAt: result.expiresAt,
+    }
+    state.childMode = {
+      sessionId,
+      bookTitle: state.currentBook?.title || '',
+      allowedStoryVersionIds: result.allowedStoryVersionIds,
+      expiresAt: result.expiresAt,
+    }
+    state.profiles = []
+    state.sessions = []
+    state.currentEvents = []
+    state.currentReport = null
+    state.auth = { ...state.auth, status: 'child', authenticated: false, role: 'CHILD' }
+    navigate(`child/${sessionId}`)
+    setToast('儿童阅读模式已开启，请交给儿童端继续')
+    return true
+  } catch (error) {
+    setToast(describeApiError(error), 'error')
+    return false
+  } finally {
+    state.sessionBusy = false
+  }
+}
+
+async function restoreChildMode(sessionId) {
+  if (!sessionId) return false
+  state.sessionLoading = true
+  state.auth = { ...state.auth, status: 'child', authenticated: false, role: 'CHILD' }
+  try {
+    const detail = await getReadingSession(sessionId)
+    state.currentSession = detail.session
+    state.currentEvents = detail.events || []
+    state.currentReport = null
+    state.currentBook = mapApiBook(await getStoryVersion(detail.session.storyVersionId))
+    state.childMode = {
+      sessionId,
+      bookTitle: state.currentBook.title,
+      allowedStoryVersionIds: [detail.session.storyVersionId],
+      expiresAt: detail.session.expiresAt,
+    }
+    return true
+  } catch (error) {
+    state.childMode = null
+    setToast(describeApiError(error), 'error')
+    return false
+  } finally {
+    state.sessionLoading = false
+  }
+}
+
+async function unlockChildMode(account, password) {
+  if (state.sessionBusy) return false
+  state.sessionBusy = true
+  try {
+    const result = await parentUnlock(account, password)
+    state.childMode = null
+    state.auth = {
+      status: 'authenticated',
+      authenticated: true,
+      role: 'GUARDIAN',
+      accountId: result.accountId,
+      account,
+      nickname: localStorage.getItem('zhiya.guardianNickname') || '知芽家长',
+    }
+    await loadProfiles()
+    await loadBooks()
+    navigate('account/overview')
+    setToast('已退出儿童模式并恢复家长空间')
+    return true
+  } catch (error) {
+    setToast(describeApiError(error), 'error')
+    return false
+  } finally {
+    state.sessionBusy = false
   }
 }
 
@@ -605,6 +767,8 @@ async function handleRoute() {
     await loadDetail(route.versionId)
   } else if (route.name === 'reader') {
     await loadReaderRoute()
+  } else if (route.name === 'child') {
+    if (!state.childMode) await restoreChildMode(route.sessionId)
   } else if (route.name === 'account' && ['growth', 'overview'].includes(route.section)) {
     await loadSessions()
   }
@@ -632,18 +796,24 @@ export const zhiyaActions = {
   signIn,
   signUp,
   signOut,
+  unlockChildMode,
   selectProfile,
   addProfile,
   editProfile,
+  removeProfile,
   loadProfiles,
   loadBooks,
   selectBook,
   openDetail,
   loadDetail,
   startReading,
+  startCurrentReading,
+  enterChildMode,
+  restoreChildMode,
   loadReaderRoute,
   recordPageChange,
   completeReading,
+  removeReadingSession,
   refreshReading,
   loadSessions,
   setToast,

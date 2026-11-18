@@ -12,12 +12,17 @@ const props = defineProps({
   totals: { type: Object, required: true },
   loading: { type: Boolean, default: false },
   saveProfileAction: { type: Function, required: true },
+  deleteProfileAction: { type: Function, default: async () => false },
+  deleteSessionAction: { type: Function, default: async () => false },
 })
 
 const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start'])
 const editing = ref(false)
 const saving = ref(false)
 const saveError = ref('')
+const deleteTarget = ref(null)
+const deleteBusy = ref(false)
+const deleteError = ref('')
 const form = reactive({ childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 })
 const plan = reactive(JSON.parse(localStorage.getItem('zhiya.plan') || '{"minutes":15,"books":1,"weekly":5}'))
 
@@ -85,6 +90,32 @@ function saveLocalNickname() {
 function sessionTitle(session) {
   return props.books.find((book) => book.storyVersionId === session.storyVersionId)?.title || `绘本期号 ${session.storyVersionId}`
 }
+
+function askDeleteProfile(profile) {
+  deleteError.value = ''
+  deleteTarget.value = { type: 'profile', id: profile.childProfileId, title: profile.nickname || '这个儿童档案' }
+}
+
+function askDeleteSession(session) {
+  deleteError.value = ''
+  deleteTarget.value = { type: 'session', id: session.readingSessionId, title: sessionTitle(session) }
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value || deleteBusy.value) return
+  deleteBusy.value = true
+  deleteError.value = ''
+  try {
+    const removed = deleteTarget.value.type === 'profile'
+      ? await props.deleteProfileAction(deleteTarget.value.id)
+      : await props.deleteSessionAction(deleteTarget.value.id)
+    if (removed) deleteTarget.value = null
+  } catch (error) {
+    deleteError.value = describeApiError(error)
+  } finally {
+    deleteBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -128,6 +159,7 @@ function sessionTitle(session) {
               <div class="card-actions">
                 <button class="secondary" type="button" @click="emit('select-profile', profile.childProfileId)">切换</button>
                 <button class="secondary" type="button" @click="openEdit(profile)">编辑</button>
+                <button class="danger" type="button" :disabled="deleteBusy" @click="askDeleteProfile(profile)">删除档案</button>
               </div>
             </article>
           </div>
@@ -161,7 +193,10 @@ function sessionTitle(session) {
           <div v-else-if="recentSessions.length" class="recent-list">
             <article v-for="session in recentSessions" :key="session.readingSessionId" class="recent-item">
               <div><strong>{{ sessionTitle(session) }}</strong><p>浏览 {{ session.visitedPageNumbers.length }} 页 · {{ session.status }}</p></div>
-              <span class="pill">修订 {{ session.revision }}</span>
+              <div class="recent-item-actions">
+                <span class="pill">修订 {{ session.revision }}</span>
+                <button class="danger" type="button" :disabled="deleteBusy" @click="askDeleteSession(session)">删除记录</button>
+              </div>
             </article>
           </div>
           <div v-else class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
@@ -224,6 +259,23 @@ function sessionTitle(session) {
             <p v-else class="address">还没有真实阅读会话，从绘本馆开始一次亲子共读吧。</p>
           </section>
         </template>
+      </section>
+    </div>
+
+    <div v-if="deleteTarget" class="modal-backdrop" @click.self="!deleteBusy && (deleteTarget = null)">
+      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="delete-account-item-title">
+        <div class="modal-head">
+          <div>
+            <h2 id="delete-account-item-title">确认删除{{ deleteTarget.type === 'profile' ? '儿童档案' : '阅读记录' }}？</h2>
+            <p>{{ deleteTarget.title }}{{ deleteTarget.type === 'profile' ? '关联的阅读会话、语音媒体和儿童授权也会一起删除。' : '删除后无法恢复。' }}</p>
+          </div>
+          <button class="modal-close" type="button" aria-label="关闭" :disabled="deleteBusy" @click="deleteTarget = null">×</button>
+        </div>
+        <p v-if="deleteError" class="form-error" role="alert">{{ deleteError }}</p>
+        <div class="modal-actions">
+          <button class="secondary" type="button" :disabled="deleteBusy" @click="deleteTarget = null">保留</button>
+          <button class="danger" type="button" :disabled="deleteBusy" @click="confirmDelete">{{ deleteBusy ? '正在删除…' : '确认删除' }}</button>
+        </div>
       </section>
     </div>
   </main>

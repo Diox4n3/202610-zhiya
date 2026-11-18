@@ -5,6 +5,7 @@ import AccountPage from './AccountPage.vue'
 import BookDetailPage from './BookDetailPage.vue'
 import HomePage from './HomePage.vue'
 import LibraryPage from './LibraryPage.vue'
+import ChildModePage from './ChildModePage.vue'
 import { mapApiBook } from '../data/preview'
 
 const wrappers = []
@@ -50,6 +51,69 @@ describe('forms wait for completion', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('form').exists()).toBe(false)
+  })
+
+  it('confirms profile deletion and waits for the backend action', async () => {
+    const remove = vi.fn().mockResolvedValue(true)
+    const wrapper = render(AccountPage, {
+      section: 'children',
+      auth: { nickname: '家长', authenticated: true },
+      profiles: [{ childProfileId: 2, nickname: '小芽', ageBand: 'AGE_4_5', interests: [], preferredMinutes: 15 }],
+      activeProfileId: 2,
+      totals: { read: 0, pages: 0, sessions: 0 },
+      saveProfileAction: vi.fn(),
+      deleteProfileAction: remove,
+    })
+    await wrapper.findAll('button').find((button) => button.text() === '删除档案').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('小芽')
+    await wrapper.findAll('button').find((button) => button.text().includes('确认删除')).trigger('click')
+    await flushPromises()
+    expect(remove).toHaveBeenCalledWith(2)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('confirms reading-history deletion without removing successful-row state early', async () => {
+    const request = deferred()
+    const remove = vi.fn().mockReturnValue(request.promise)
+    const wrapper = render(AccountPage, {
+      section: 'growth',
+      auth: { nickname: '家长', authenticated: true },
+      books: [{ storyVersionId: 88, title: '测试绘本' }],
+      sessions: [{ readingSessionId: 7, storyVersionId: 88, visitedPageNumbers: [1], status: 'FINISHED', revision: 2 }],
+      totals: { read: 1, pages: 1, sessions: 1 },
+      saveProfileAction: vi.fn(),
+      deleteSessionAction: remove,
+    })
+    await wrapper.findAll('button').find((button) => button.text() === '删除记录').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('确认删除')).trigger('click')
+    expect(remove).toHaveBeenCalledWith(7)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    request.resolve(true)
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+})
+
+describe('child-mode parent unlock', () => {
+  it('requires the guardian password and delegates unlock to the backend action', async () => {
+    const request = deferred()
+    const unlock = vi.fn().mockReturnValue(request.promise)
+    const wrapper = render(ChildModePage, {
+      childMode: { sessionId: 9, allowedStoryVersionIds: [88], expiresAt: new Date(Date.now() + 600000).toISOString() },
+      book: { title: '测试绘本' },
+      auth: { account: 'parent-a' },
+      unlockAction: unlock,
+    })
+    const form = wrapper.get('.child-handoff-unlock')
+    await form.find('input[type="password"]').setValue('password123')
+    await form.trigger('submit')
+    await form.trigger('submit')
+    expect(unlock).toHaveBeenCalledTimes(1)
+    expect(unlock).toHaveBeenCalledWith('parent-a', 'password123')
+    expect(wrapper.get('.child-handoff-unlock button').element.disabled).toBe(true)
+    request.resolve(true)
+    await flushPromises()
+    expect(wrapper.get('.child-handoff-unlock button').element.disabled).toBe(false)
   })
 })
 

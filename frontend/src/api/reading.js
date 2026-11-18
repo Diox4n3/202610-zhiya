@@ -37,3 +37,17 @@ export async function completeReadingSession(sessionId, payload) {
   })
   return result.data
 }
+
+export async function deleteReadingSession(sessionId) {
+  await apiRequest(`/reading-sessions/${sessionId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function updateReadingMode(sessionId, payload) {
+  const result = await apiRequest(`/reading-sessions/${sessionId}/mode-settings`, {
+    method: 'PUT',
+    body: payload,
+  })
+  return result.data
+}

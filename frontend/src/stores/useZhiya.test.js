@@ -5,10 +5,10 @@ import * as profiles from '../api/profiles'
 import * as books from '../api/storybooks'
 import * as reading from '../api/reading'
 
-vi.mock('../api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), logout: vi.fn(), register: vi.fn() }))
-vi.mock('../api/profiles', () => ({ listProfiles: vi.fn(), createProfile: vi.fn(), updateProfile: vi.fn() }))
+vi.mock('../api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), logout: vi.fn(), parentUnlock: vi.fn(), register: vi.fn() }))
+vi.mock('../api/profiles', () => ({ listProfiles: vi.fn(), createProfile: vi.fn(), updateProfile: vi.fn(), deleteProfile: vi.fn() }))
 vi.mock('../api/storybooks', () => ({ listStorybooks: vi.fn(), getStoryVersion: vi.fn() }))
-vi.mock('../api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn(), addReadingEvent: vi.fn(), completeReadingSession: vi.fn(), listReadingSessions: vi.fn() }))
+vi.mock('../api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn(), addReadingEvent: vi.fn(), completeReadingSession: vi.fn(), listReadingSessions: vi.fn(), deleteReadingSession: vi.fn(), updateReadingMode: vi.fn() }))
 
 const session = (overrides = {}) => ({ readingSessionId: 55, storyVersionId: 88, currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS', ...overrides })
 const detail = (overrides = {}) => ({ session: session(overrides), events: [], report: null })
@@ -30,6 +30,10 @@ beforeEach(async () => {
   reading.getReadingSession.mockImplementation(async () => detail())
   reading.addReadingEvent.mockResolvedValue({ revision: 2 })
   reading.listReadingSessions.mockResolvedValue([session()])
+  profiles.deleteProfile.mockResolvedValue(undefined)
+  reading.deleteReadingSession.mockResolvedValue(undefined)
+  reading.updateReadingMode.mockResolvedValue({ mode: 'CHILD_SOLO', childGrantId: 4, allowedStoryVersionIds: [88], expiresAt: '2026-11-18T08:00:00Z' })
+  auth.parentUnlock.mockResolvedValue({ accountId: 1 })
   const store = await import('./useZhiya')
   state = store.zhiya
   actions = store.zhiyaActions
@@ -151,6 +155,8 @@ describe('authoritative reading progress', () => {
     reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
     reading.addReadingEvent.mockResolvedValueOnce({ revision: 1 })
     await actions.loadReaderRoute()
+    expect(reading.addReadingEvent).not.toHaveBeenCalled()
+    expect(await actions.startCurrentReading()).toBe(true)
     expect(reading.addReadingEvent.mock.calls[0][1]).toMatchObject({ eventType: 'STARTED', expectedRevision: 0, pageNumber: 1 })
     expect(state.currentSession.status).toBe('IN_PROGRESS')
   })
@@ -236,6 +242,52 @@ describe('account isolation and logout', () => {
     pending.resolve(detail({ readingSessionId: 99 }))
     await loading
     expect(state.currentSession).toBeNull()
+  })
+
+  it('deletes a child profile and refreshes the active profile and reading history', async () => {
+    await actions.signIn('parent-a', 'password123')
+    profiles.listProfiles.mockResolvedValueOnce([])
+    reading.listReadingSessions.mockResolvedValueOnce([])
+    expect(await actions.removeProfile(1)).toBe(true)
+    expect(profiles.deleteProfile).toHaveBeenCalledWith(1)
+    expect(state.profiles).toEqual([])
+    expect(state.activeProfileId).toBe(0)
+    expect(localStorage.getItem('zhiya.activeProfileId')).toBeNull()
+  })
+
+  it('removes a deleted reading session from account state', async () => {
+    await actions.signIn('parent-a', 'password123')
+    await actions.loadSessions()
+    expect(await actions.removeReadingSession(55)).toBe(true)
+    expect(reading.deleteReadingSession).toHaveBeenCalledWith(55)
+    expect(state.sessions).toEqual([])
+  })
+})
+
+describe('child-mode handoff', () => {
+  it('enters child mode only from CREATED and restores the parent after password unlock', async () => {
+    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
+    await actions.loadReaderRoute()
+    expect(await actions.startCurrentReading()).toBe(true)
+    expect(await actions.enterChildMode(55, [88], 600)).toBe(false)
+
+    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
+    await actions.loadReaderRoute()
+    expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
+    expect(reading.updateReadingMode).toHaveBeenCalledWith(55, {
+      mode: 'CHILD_SOLO',
+      allowedStoryVersionIds: [88],
+      timeLimitSeconds: 600,
+    })
+    expect(state.auth.status).toBe('child')
+    expect(state.auth.authenticated).toBe(false)
+    expect(state.childMode.sessionId).toBe(55)
+
+    expect(await actions.unlockChildMode('parent-a', 'password123')).toBe(true)
+    expect(auth.parentUnlock).toHaveBeenCalledWith('parent-a', 'password123')
+    expect(state.childMode).toBeNull()
+    expect(state.auth.status).toBe('authenticated')
+    expect(state.auth.authenticated).toBe(true)
   })
 })
 

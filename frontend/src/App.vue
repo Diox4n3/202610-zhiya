@@ -7,6 +7,7 @@ import LibraryPage from './pages/LibraryPage.vue'
 import BookDetailPage from './pages/BookDetailPage.vue'
 import ReaderPage from './pages/ReaderPage.vue'
 import AccountPage from './pages/AccountPage.vue'
+import ChildModePage from './pages/ChildModePage.vue'
 import { activeProfile, totals, zhiya, zhiyaActions } from './stores/useZhiya'
 
 const state = zhiya
@@ -48,7 +49,16 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
 </script>
 
 <template>
-  <div class="app">
+  <ChildModePage
+    v-if="state.route.name === 'child'"
+    :child-mode="state.childMode"
+    :session="state.currentSession"
+    :book="state.currentBook"
+    :auth="state.auth"
+    :loading="state.sessionLoading"
+    :unlock-action="zhiyaActions.unlockChildMode"
+  />
+  <div v-else class="app">
     <AppHeader
       :route="state.route"
       :auth="state.auth"
@@ -106,9 +116,11 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :record-page="zhiyaActions.recordPageChange"
       :complete-reading="zhiyaActions.completeReading"
       :refresh-reading="zhiyaActions.refreshReading"
+      :available-books="state.books.filter((book) => book.source === 'api')"
+      :enter-child-mode-action="zhiyaActions.enterChildMode"
       @back="openDetail"
       @library="zhiyaActions.navigate('library')"
-      @start-session="zhiyaActions.loadReaderRoute"
+      @start-session="zhiyaActions.startCurrentReading"
     />
     <AccountPage
       v-else-if="state.route.name === 'account'"
@@ -123,6 +135,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       @navigate="zhiyaActions.navigate"
       @select-profile="zhiyaActions.selectProfile"
       :save-profile-action="handleProfileSave"
+      :delete-profile-action="zhiyaActions.removeProfile"
+      :delete-session-action="zhiyaActions.removeReadingSession"
       @sign-out="zhiyaActions.signOut"
       @start="startBook"
     />
