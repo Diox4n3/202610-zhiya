@@ -85,6 +85,7 @@ let authEpoch = 0
 let knownCsrf = readCsrfCookie()
 let profilesRequest = 0
 let booksRequest = 0
+let pendingBookRestore = null
 let detailRequest = 0
 let sessionsRequest = 0
 let readingEpoch = 0
@@ -108,6 +109,7 @@ function clearAccountViews() {
   state.currentReport = null
   state.bookFilters = { ageBand: '', topic: '' }
   state.selectedBookId = ''
+  pendingBookRestore = null
   profilesRequest += 1
   booksRequest += 1
   sessionsRequest += 1
@@ -125,12 +127,13 @@ function clearAccountViews() {
 function resetAuthentication() {
   authEpoch += 1
   knownCsrf = readCsrfCookie()
-  clearAccountViews()
+  if (state.auth.authenticated) localStorage.removeItem(bookSelectionKey('preview'))
   rememberChildSession(null)
-  for (const key of ['account', 'activeProfileId', 'selectedBookId', 'bookSelectionExplicit', 'plan', 'guardianNickname']) {
+  for (const key of ['account', 'activeProfileId', 'selectedBookId', 'previewSelectedBookId', 'bookSelectionExplicit', 'plan', 'guardianNickname']) {
     localStorage.removeItem(`zhiya.${key}`)
   }
   state.auth = { status: 'anonymous', authenticated: false, role: 'GUARDIAN', accountId: null, account: '', nickname: '知芽家长' }
+  clearAccountViews()
 }
 
 function activeProfile() {
@@ -179,14 +182,15 @@ function updateBodyView() {
 }
 
 function bookSelectionKey(source) {
-  return source === 'preview' ? 'zhiya.previewSelectedBookId' : 'zhiya.selectedBookId'
+  if (source === 'api') return 'zhiya.selectedBookId'
+  return state.auth.authenticated ? `zhiya.previewSelectedBookId:${state.auth.account}` : 'zhiya.guestPreviewSelectedBookId'
 }
 
 function applyBooks(items, source, message = '') {
   state.books = items
   state.booksSource = source
   state.booksError = message
-  if (!items.some((book) => book.id === state.selectedBookId)) {
+  if (source === 'preview' || !items.some((book) => book.id === state.selectedBookId)) {
     const saved = localStorage.getItem(bookSelectionKey(source))
     state.selectedBookId = items.find((book) => book.id === saved)?.id || ''
   }
@@ -205,14 +209,16 @@ function loadPreviewBooks(message = '') {
 
 function loadBooks(filters = {}, restoreBookId = null) {
   state.bookFilters = { ...state.bookFilters, ...filters }
+  pendingBookRestore = state.bookFilters.ageBand || state.bookFilters.topic ? null : restoreBookId
   state.nextBooksPage = null
-  return fetchBooksPage(1, restoreBookId)
+  return fetchBooksPage(1)
 }
 
-async function fetchBooksPage(page, restoreBookId = null) {
+async function fetchBooksPage(page) {
   const epoch = authEpoch
   const request = ++booksRequest
   const pageSize = 30
+  const keepSelection = pendingBookRestore !== null || Boolean(state.booksError && state.selectedBookId)
   state.booksLoading = true
   state.booksError = ''
   try {
@@ -232,7 +238,7 @@ async function fetchBooksPage(page, restoreBookId = null) {
       const existing = new Set(state.books.map((book) => book.storyVersionId))
       const added = items.filter((book) => !existing.has(book.storyVersionId)).map(mapApiBook)
       applyBooks([...state.books, ...added], 'api')
-      if (!restoreBookId && added.length && !added.some((book) => book.id === state.selectedBookId)) {
+      if (!keepSelection && added.length && !added.some((book) => book.id === state.selectedBookId)) {
         state.selectedBookId = added[0].id
       }
     } else if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
@@ -240,18 +246,27 @@ async function fetchBooksPage(page, restoreBookId = null) {
     } else {
       applyBooks(items.map(mapApiBook), 'api')
     }
-    if (restoreBookId && !state.bookFilters.ageBand && !state.bookFilters.topic
-        && localStorage.getItem(bookSelectionKey('api')) === restoreBookId
-        && !state.books.some((book) => book.id === restoreBookId)) {
-      if (state.nextBooksPage) await fetchBooksPage(state.nextBooksPage, restoreBookId)
-      else localStorage.removeItem(bookSelectionKey('api'))
+    if (pendingBookRestore) {
+      const key = bookSelectionKey('api')
+      if (localStorage.getItem(key) !== pendingBookRestore) {
+        pendingBookRestore = null
+      } else if (state.books.some((book) => book.id === pendingBookRestore)) {
+        state.selectedBookId = pendingBookRestore
+        pendingBookRestore = null
+      } else if (state.nextBooksPage) {
+        await fetchBooksPage(state.nextBooksPage)
+      } else {
+        localStorage.removeItem(key)
+        pendingBookRestore = null
+      }
     }
   } catch (error) {
     if (epoch !== authEpoch || request !== booksRequest) return
     if (error instanceof ApiError && error.status === 401) {
       resetAuthentication()
       loadPreviewBooks('登录后读取后端绘本，当前展示本地设计预览。')
-    } else if (state.nextBooksPage !== null) {
+    } else if (pendingBookRestore || state.nextBooksPage !== null) {
+      state.nextBooksPage = page
       state.booksError = error.message || '书架加载失败，请重试。'
     } else {
       loadPreviewBooks(error.message || '绘本列表暂时不可用，已切换到本地预览。')
@@ -268,6 +283,7 @@ function loadMoreBooks() {
 }
 
 function refreshShelfAfterNotFound() {
+  pendingBookRestore = null
   if (state.booksLoading && state.nextBooksPage === null) {
     // The old shelf may still be visible while a new filter's first page loads.
     return loadBooks()
@@ -640,6 +656,7 @@ async function removeReadingSession(sessionId, confirmedUnlisted = false) {
 
 function selectBook(bookId) {
   if (!state.books.some((book) => book.id === bookId)) return
+  pendingBookRestore = null
   state.selectedBookId = bookId
   localStorage.setItem(bookSelectionKey(state.booksSource), bookId)
 }
@@ -1168,7 +1185,7 @@ async function handleRoute() {
 
   const route = state.route
   if (route.name === 'library') {
-    if (state.auth.authenticated && state.booksSource !== 'api') await loadBooks()
+    if (state.auth.authenticated && state.booksSource !== 'api' && state.nextBooksPage === null) await loadBooks()
   } else if (route.name === 'detail' && route.versionId) {
     await loadDetail(route.versionId)
   } else if (route.name === 'reader') {

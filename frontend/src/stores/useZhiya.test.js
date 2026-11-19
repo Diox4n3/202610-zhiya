@@ -176,6 +176,25 @@ describe('authoritative reading progress', () => {
 })
 
 describe('account isolation and logout', () => {
+  it('does not carry a guardian’s preview selection across logout or the next login', async () => {
+    books.listStorybooks.mockResolvedValue([])
+    await actions.signIn('parent-a', 'password123')
+    expect(state.booksSource).toBe('preview')
+    const selectedId = state.books[1].id
+    actions.selectBook(selectedId)
+    expect(state.selectedBookId).toBe(selectedId)
+
+    expect(await actions.signOut()).toBe(true)
+    expect(state.booksSource).toBe('preview')
+    expect(state.selectedBookId).toBe('')
+
+    auth.login.mockResolvedValueOnce({ data: { accountId: 2 } })
+    await actions.signIn('parent-b', 'password123')
+    expect(state.auth.accountId).toBe(2)
+    expect(state.booksSource).toBe('preview')
+    expect(state.selectedBookId).toBe('')
+  })
+
   it.each([
     ['same guardian with the book still visible', true, false, true],
     ['same guardian with the book removed', false, false, false],
@@ -226,6 +245,66 @@ describe('account isolation and logout', () => {
 
     expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual(manuallySelect ? [1, 2] : [1])
     expect(refreshed.selectedBookId).toBe(manuallySelect ? laterBookId : '')
+  })
+
+  it.each([
+    ['the first page fails', 1, null, [1, 1, 2, 3]],
+    ['the second page fails', 2, null, [1, 2, 2, 3]],
+    ['the guardian changes selection after the second page fails', 2, 'version-5', [1, 2, 2]],
+  ])('retries a paginated bookshelf restore when %s', async (_, failedPage, manualId, expectedPages) => {
+    const savedId = 'version-63'
+    const selectionKey = 'zhiya.selectedBookId'
+    localStorage.setItem('zhiya.account', 'parent-a')
+    localStorage.setItem(selectionKey, savedId)
+    window.history.replaceState({}, '', '/#home')
+    const catalog = Array.from({ length: 63 }, (_, index) => ({ ...version, storyVersionId: index + 1 }))
+    let failed = false
+    books.listStorybooks.mockClear()
+    books.listStorybooks.mockImplementation(async ({ page, pageSize }) => {
+      if (page === failedPage && !failed) {
+        failed = true
+        throw new Error('offline')
+      }
+      return catalog.slice((page - 1) * pageSize, page * pageSize)
+    })
+    vi.resetModules()
+    const { zhiya: refreshed, zhiyaActions: refreshedActions } = await import('./useZhiya')
+    await refreshedActions.bootstrap()
+
+    expect(refreshed.booksError).toContain('offline')
+    expect(refreshed.nextBooksPage).toBe(failedPage)
+    expect(localStorage.getItem(selectionKey)).toBe(savedId)
+    if (manualId) refreshedActions.selectBook(manualId)
+    await refreshedActions.loadMoreBooks()
+
+    expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual(expectedPages)
+    expect(refreshed.booksSource).toBe('api')
+    expect(refreshed.booksError).toBe('')
+    expect(refreshed.selectedBookId).toBe(manualId || savedId)
+    expect(localStorage.getItem(selectionKey)).toBe(manualId || savedId)
+  })
+
+  it('keeps the bookshelf retry available after a direct library refresh', async () => {
+    localStorage.setItem('zhiya.account', 'parent-a')
+    localStorage.setItem('zhiya.selectedBookId', 'version-63')
+    window.history.replaceState({}, '', '/#library')
+    books.listStorybooks.mockClear()
+    books.listStorybooks.mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue([{ ...version, storyVersionId: 63 }])
+    vi.resetModules()
+    const { zhiya: refreshed, zhiyaActions: refreshedActions } = await import('./useZhiya')
+    await refreshedActions.bootstrap()
+    await refreshedActions.syncRoute()
+
+    expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual([1])
+    expect(refreshed.booksError).toContain('offline')
+    expect(refreshed.nextBooksPage).toBe(1)
+
+    await refreshedActions.loadMoreBooks()
+
+    expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual([1, 1])
+    expect(refreshed.booksError).toBe('')
+    expect(refreshed.selectedBookId).toBe('version-63')
   })
 
   it.each(['account', 'credential'])('invalidates pending guardian reads on a change of %s', async (change) => {
