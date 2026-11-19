@@ -176,6 +176,58 @@ describe('authoritative reading progress', () => {
 })
 
 describe('account isolation and logout', () => {
+  it.each([
+    ['same guardian with the book still visible', true, false, true],
+    ['same guardian with the book removed', false, false, false],
+    ['a different guardian who can also see the book', true, true, false],
+  ])('restores manual book selection after refresh only when allowed (%s)', async (_, bookVisible, switchAccount, restoresSelection) => {
+    const secondBook = { ...version, storyVersionId: 99, title: '第二本测试绘本' }
+    books.listStorybooks.mockResolvedValue([version, secondBook])
+    await actions.signIn('parent-a', 'password123')
+    const selectedId = state.books[1].id
+    actions.selectBook(selectedId)
+    expect(state.selectedBookId).toBe(selectedId)
+
+    books.listStorybooks.mockResolvedValue(bookVisible ? [version, secondBook] : [version])
+    window.history.replaceState({}, '', '/#home')
+    vi.resetModules()
+    const { zhiya: refreshed, zhiyaActions: refreshedActions } = await import('./useZhiya')
+    if (switchAccount) {
+      auth.login.mockResolvedValueOnce({ data: { accountId: 2 } })
+      await refreshedActions.signIn('parent-b', 'password123')
+    } else {
+      await refreshedActions.bootstrap()
+    }
+
+    expect(refreshed.auth.authenticated).toBe(true)
+    expect(refreshed.booksSource).toBe('api')
+    expect(refreshed.selectedBookId).toBe(restoresSelection ? selectedId : '')
+  })
+
+  it.each([
+    ['with a manual selection', true],
+    ['after loading more without a manual selection', false],
+  ])('refreshes a paginated bookshelf %s', async (_, manuallySelect) => {
+    const firstPage = Array.from({ length: 30 }, (_, index) => ({ ...version, storyVersionId: index + 1 }))
+    const laterBook = { ...version, storyVersionId: 31 }
+    books.listStorybooks.mockImplementation(async ({ page }) => page === 1 ? firstPage : [laterBook])
+    await actions.signIn('parent-a', 'password123')
+    await actions.loadMoreBooks()
+    const laterBookId = state.books.at(-1).id
+    expect(state.books.at(-1).storyVersionId).toBe(laterBook.storyVersionId)
+    expect(state.selectedBookId).toBe(laterBookId)
+    if (manuallySelect) actions.selectBook(laterBookId)
+
+    books.listStorybooks.mockClear()
+    window.history.replaceState({}, '', '/#home')
+    vi.resetModules()
+    const { zhiya: refreshed, zhiyaActions: refreshedActions } = await import('./useZhiya')
+    await refreshedActions.bootstrap()
+
+    expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual(manuallySelect ? [1, 2] : [1])
+    expect(refreshed.selectedBookId).toBe(manuallySelect ? laterBookId : '')
+  })
+
   it.each(['account', 'credential'])('invalidates pending guardian reads on a change of %s', async (change) => {
     await actions.signIn('parent-a', 'password123')
     await actions.loadSessions()

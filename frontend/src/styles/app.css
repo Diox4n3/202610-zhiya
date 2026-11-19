@@ -802,8 +802,7 @@
       position: relative;
       z-index: 2;
       margin-top: 0;
-      transform: translate(0, -56px) scale(1.24);
-      transform-origin: center center;
+      transform: translateY(-56px);
     }
     .book-wheel-panel {
       width: min(100%, 1080px);
@@ -833,6 +832,7 @@
       position: absolute;
       inset: 0;
       z-index: 1;
+      transform: scale(1.24);
       transform-style: preserve-3d;
     }
     .wheel-book {

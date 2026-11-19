@@ -178,12 +178,17 @@ function updateBodyView() {
   document.body.dataset.view = state.route.name
 }
 
+function bookSelectionKey(source) {
+  return source === 'preview' ? 'zhiya.previewSelectedBookId' : 'zhiya.selectedBookId'
+}
+
 function applyBooks(items, source, message = '') {
   state.books = items
   state.booksSource = source
   state.booksError = message
   if (!items.some((book) => book.id === state.selectedBookId)) {
-    state.selectedBookId = ''
+    const saved = localStorage.getItem(bookSelectionKey(source))
+    state.selectedBookId = items.find((book) => book.id === saved)?.id || ''
   }
 }
 
@@ -198,13 +203,13 @@ function loadPreviewBooks(message = '') {
   applyBooks(filtered, 'preview', message)
 }
 
-function loadBooks(filters = {}) {
+function loadBooks(filters = {}, restoreBookId = null) {
   state.bookFilters = { ...state.bookFilters, ...filters }
   state.nextBooksPage = null
-  return fetchBooksPage(1)
+  return fetchBooksPage(1, restoreBookId)
 }
 
-async function fetchBooksPage(page) {
+async function fetchBooksPage(page, restoreBookId = null) {
   const epoch = authEpoch
   const request = ++booksRequest
   const pageSize = 30
@@ -227,14 +232,20 @@ async function fetchBooksPage(page) {
       const existing = new Set(state.books.map((book) => book.storyVersionId))
       const added = items.filter((book) => !existing.has(book.storyVersionId)).map(mapApiBook)
       applyBooks([...state.books, ...added], 'api')
-      if (added.length) selectBook(added[0].id)
-      return
-    }
-    if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
+      if (!restoreBookId && added.length && !added.some((book) => book.id === state.selectedBookId)) {
+        state.selectedBookId = added[0].id
+      }
+    } else if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
       loadPreviewBooks('后端当前没有可见的已发布绘本，当前展示本地设计预览。')
-      return
+    } else {
+      applyBooks(items.map(mapApiBook), 'api')
     }
-    applyBooks(items.map(mapApiBook), 'api')
+    if (restoreBookId && !state.bookFilters.ageBand && !state.bookFilters.topic
+        && localStorage.getItem(bookSelectionKey('api')) === restoreBookId
+        && !state.books.some((book) => book.id === restoreBookId)) {
+      if (state.nextBooksPage) await fetchBooksPage(state.nextBooksPage, restoreBookId)
+      else localStorage.removeItem(bookSelectionKey('api'))
+    }
   } catch (error) {
     if (epoch !== authEpoch || request !== booksRequest) return
     if (error instanceof ApiError && error.status === 401) {
@@ -367,7 +378,7 @@ async function refreshIdentity() {
       await Promise.all([loadBooks(), handleRoute()])
       return
     }
-    await loadBooks()
+    await loadBooks({}, localStorage.getItem(bookSelectionKey('api')))
     if (epoch !== authEpoch) return
   } catch (error) {
     if (epoch !== authEpoch) return
@@ -630,6 +641,7 @@ async function removeReadingSession(sessionId, confirmedUnlisted = false) {
 function selectBook(bookId) {
   if (!state.books.some((book) => book.id === bookId)) return
   state.selectedBookId = bookId
+  localStorage.setItem(bookSelectionKey(state.booksSource), bookId)
 }
 
 function openDetail(bookOrVersionId) {
