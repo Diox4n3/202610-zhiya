@@ -8,8 +8,12 @@ const props = defineProps({
   book: { type: Object, default: null },
   auth: { type: Object, required: true },
   loading: { type: Boolean, default: false },
+  identityLoading: { type: Boolean, default: false },
+  identityError: { type: String, default: '' },
   unlockAction: { type: Function, required: true },
 })
+const emit = defineEmits(['recheck-identity'])
+const verifying = computed(() => ['checking', 'verifying-handoff'].includes(props.auth.status))
 
 const account = ref(props.auth.account || '')
 const password = ref('')
@@ -34,6 +38,7 @@ async function unlock() {
   try {
     const unlocked = await props.unlockAction(account.value.trim(), password.value)
     if (unlocked === false) error.value = '家长解锁失败，请检查账号和密码后重试。'
+    else password.value = ''
   } catch (reason) {
     error.value = describeApiError(reason)
   } finally {
@@ -52,9 +57,10 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <section class="child-handoff-card">
       <div class="child-mode-mark" aria-hidden="true">芽</div>
       <p class="eyebrow">儿童自主阅读模式</p>
-      <h1>{{ auth.status === 'handoff' ? '请家长解锁设备' : '阅读空间已为孩子准备好' }}</h1>
+      <h1 v-if="verifying">正在核对设备身份</h1>
+      <h1 v-else>{{ auth.status === 'handoff' ? '请家长解锁设备' : '阅读空间已为孩子准备好' }}</h1>
       <p v-if="book" class="child-handoff-book">当前绘本：{{ book.title }}</p>
-      <p v-if="auth.status !== 'handoff'">
+      <p v-if="!verifying && auth.status !== 'handoff'">
         本次剩余：{{ remaining }}
         <template v-if="Number.isInteger(childMode?.allowedStoryVersionCount)">
           · 已授权 {{ childMode.allowedStoryVersionCount }} 个绘本版本
@@ -63,7 +69,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <div class="child-handoff-notice">
         这是桌面家长端的授权与交接页。儿童阅读交互由手机端或 4.3C 硬件端模块承接；本页面不会展示家长导航、档案或历史记录。
       </div>
-      <p v-if="loading" class="child-handoff-loading" role="status">正在核对当前儿童授权的会话信息…</p>
+      <div v-if="verifying" class="child-handoff-loading">
+        <p v-if="identityError" role="alert">{{ identityError }}</p>
+        <button class="secondary" type="button" :disabled="identityLoading" @click="emit('recheck-identity')">{{ identityLoading ? '正在读取设备身份…' : '重新核对设备身份' }}</button>
+      </div>
+      <p v-else-if="loading" class="child-handoff-loading" role="status">正在核对当前儿童授权的会话信息…</p>
       <form v-else class="child-handoff-unlock" @submit.prevent="unlock">
         <h2>家长解锁</h2>
         <label class="form-field"><span>家长账号</span><input v-model="account" autocomplete="username"></label>

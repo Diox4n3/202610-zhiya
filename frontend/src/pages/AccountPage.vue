@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { describeApiError } from '../api/client'
 import { ageLabels } from '../data/preview'
 
@@ -31,7 +31,8 @@ const saveError = ref('')
 const deleteTarget = ref(null)
 const deleteBusy = ref(false)
 const deleteError = ref('')
-const form = reactive({ childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 })
+const emptyProfile = { childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 }
+const form = reactive({ ...emptyProfile })
 const plan = reactive(JSON.parse(localStorage.getItem('zhiya.plan') || '{"minutes":15,"books":1,"weekly":5}'))
 
 const nav = [
@@ -48,6 +49,17 @@ const activeProfile = computed(() => {
 })
 const profileAction = computed(() => props.profiles.length ? '选择儿童档案' : '添加儿童档案')
 const recentSessions = computed(() => props.sessions.slice(0, 4))
+const unlistedDeleteIds = computed(() => [...(props.pendingDeletionChecks.session || [])].filter(
+  id => !props.sessions.some(session => session.readingSessionId === id),
+))
+const profileDeletePending = computed(() => deleteBusy.value || props.pendingDeletionChecks.profile?.has(form.childProfileId))
+watch(() => props.profiles, profiles => {
+  if (editing.value && form.childProfileId !== null && !profiles.some(p => p.childProfileId === form.childProfileId)) {
+    editing.value = false
+    saveError.value = ''
+    Object.assign(form, emptyProfile)
+  }
+})
 const sessionStatusLabels = {
   CREATED: '未开始',
   IN_PROGRESS: '阅读中',
@@ -64,7 +76,7 @@ function growthValue(metric) {
 function openNew() {
   if (saving.value) return
   saveError.value = ''
-  Object.assign(form, { childProfileId: null, nickname: '', ageBand: 'AGE_4_5', interests: '', preferredMinutes: 15 })
+  Object.assign(form, emptyProfile)
   editing.value = true
 }
 
@@ -82,7 +94,7 @@ function openEdit(profile) {
 }
 
 async function saveProfile() {
-  if (saving.value) return
+  if (saving.value || profileDeletePending.value) return
   saveError.value = ''
   saving.value = true
   const payload = {
@@ -133,7 +145,7 @@ function askDeleteSession(session) {
     type: 'session',
     id: session.readingSessionId,
     needsCheck: props.pendingDeletionChecks.session?.has(session.readingSessionId),
-    title: `${sessionTitle(session)}（${sessionRecordLabel(session)}）`,
+    title: session.storyVersionId ? `${sessionTitle(session)}（${sessionRecordLabel(session)}）` : sessionRecordLabel(session),
   }
 }
 
@@ -145,12 +157,13 @@ async function confirmDelete() {
   try {
     if (!target.needsCheck) {
       const remove = target.type === 'profile' ? props.deleteProfileAction : props.deleteSessionAction
-      const result = await remove(target.id)
+      const result = target.confirmedUnlisted ? await remove(target.id, true) : await remove(target.id)
       if (result !== 'unconfirmed') {
         if (result) deleteTarget.value = null
         return
       }
       target.needsCheck = true
+      target.confirmedUnlisted = false
     }
     const result = await props.checkDeletionAction(target.type, target.id)
     if (result === 'absent') {
@@ -158,6 +171,10 @@ async function confirmDelete() {
     } else if (result === 'present') {
       target.needsCheck = false
       deleteError.value = '已核对，目标仍在列表中。如需删除，请再次确认。'
+    } else if (result === 'unlisted') {
+      target.needsCheck = false
+      target.confirmedUnlisted = true
+      deleteError.value = '已核对，这条记录仍保存在当前账号，但未显示在阅读历史中。如需删除，请再次确认。'
     } else {
       deleteError.value = '删除结果尚未确认，请重新核对。'
     }
@@ -220,7 +237,7 @@ async function confirmDelete() {
               <div class="card-actions">
                 <button class="secondary" type="button" @click="emit('select-profile', profile.childProfileId)">切换</button>
                 <button class="secondary" type="button" @click="openEdit(profile)">编辑</button>
-                <button class="danger" type="button" :disabled="deleteBusy" @click="askDeleteProfile(profile)">删除档案</button>
+                <button class="danger" type="button" :disabled="deleteBusy || (saving && form.childProfileId === profile.childProfileId)" @click="askDeleteProfile(profile)">删除档案</button>
               </div>
             </article>
           </div>
@@ -237,7 +254,7 @@ async function confirmDelete() {
             <label class="form-field"><span>兴趣</span><input v-model="form.interests" placeholder="用顿号分隔，例如：动物、自然"></label>
             <label class="form-field"><span>每日阅读分钟</span><input v-model.number="form.preferredMinutes" type="number" min="1" max="30"></label>
             <p v-if="saveError" class="form-error" role="alert">{{ saveError }}</p>
-            <div class="modal-actions"><button class="secondary" type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '正在保存…' : '保存档案' }}</button></div>
+            <div class="modal-actions"><button class="secondary" type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="submit" :disabled="saving || profileDeletePending">{{ saving ? '正在保存…' : '保存档案' }}</button></div>
           </form>
         </template>
 
@@ -258,7 +275,11 @@ async function confirmDelete() {
               </div>
             </article>
           </div>
-          <div v-else-if="totalsLoaded && !sessionsError" class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
+          <div v-else-if="totalsLoaded && !sessionsError && !unlistedDeleteIds.length" class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
+          <div v-for="id in unlistedDeleteIds" :key="id" class="account-data-error">
+            <span>阅读记录 #{{ id }} · 删除结果待确认</span>
+            <button class="secondary" type="button" :disabled="deleteBusy" @click="askDeleteSession({ readingSessionId: id })">核对删除结果</button>
+          </div>
         </template>
 
         <template v-else-if="section === 'shelf'">

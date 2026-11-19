@@ -4,12 +4,12 @@ import { ApiError } from './api/client'
 import { login, parentUnlock } from './api/auth'
 import { deleteProfile, listProfiles } from './api/profiles'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
-import { addReadingEvent, createReadingSession, deleteReadingSession, getReadingSession, listReadingSessions } from './api/reading'
+import { addReadingEvent, createReadingSession, deleteReadingSession, getDeletionStatus, getReadingSession, listReadingSessions, updateReadingMode } from './api/reading'
 
 vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), parentUnlock: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []), deleteProfile: vi.fn() }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
-vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), deleteReadingSession: vi.fn(), listReadingSessions: vi.fn() }))
+vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), deleteReadingSession: vi.fn(), getDeletionStatus: vi.fn(), listReadingSessions: vi.fn(), updateReadingMode: vi.fn() }))
 
 const book = { storyVersionId: 88, title: '书架上的绘本', status: 'PUBLISHED', pages: [{ pageNumber: 1, text: '只在授权时可读的正文' }] }
 const firstPage = Array.from({ length: 30 }, (_, i) => ({ ...book, storyVersionId: i + 1, title: '绘本' + (i + 1) }))
@@ -33,6 +33,7 @@ beforeEach(() => {
   sessionStorage.clear()
   listStorybooks.mockResolvedValue([book])
   listReadingSessions.mockResolvedValue([])
+  getDeletionStatus.mockResolvedValue(false)
 })
 afterEach(() => wrapper?.unmount())
 
@@ -558,5 +559,155 @@ it.each(['overview', 'growth'])('shows unknown totals on %s after a profile dele
   listReadingSessions.mockResolvedValueOnce([])
   await route(section)
   expect(values()).toEqual(['0', '0', '0'])
+  expect(deleteProfile).toHaveBeenCalledOnce()
+})
+
+const childOnly = () => new ApiError('仅限家长', { status: 403, code: 'FORBIDDEN' })
+const offline = () => new ApiError('暂不可用', { status: 503 })
+const handoffSession = mode => ({
+  session: { readingSessionId: 55, storyVersionId: 88, currentPage: 1, mode, status: 'CREATED', visitedPageNumbers: [], revision: 0 },
+  events: [], report: null,
+})
+
+it.each(['child', 'guardian'])('reconciles a lost mode-change response and restores the confirmed %s view', async role => {
+  getReadingSession.mockResolvedValue(handoffSession('PARENT_CHILD'))
+  getStoryVersion.mockResolvedValue(book)
+  await open('reader/55')
+  await wrapper.get('.child-mode-card button').trigger('click')
+  updateReadingMode.mockRejectedValueOnce(uncertainDelete())
+  listProfiles.mockRejectedValueOnce(offline())
+  await wrapper.get('[aria-labelledby="child-mode-title"] button.primary').trigger('click')
+  await flushPromises()
+  expect(location.hash).toBe('#child/55')
+  expect(wrapper.find('.site-header').exists()).toBe(false)
+  expect(wrapper.find('.child-handoff-unlock').exists()).toBe(false)
+  expect(wrapper.get('.child-handoff-loading').text()).toContain('重新核对设备身份')
+  if (role === 'child') listProfiles.mockRejectedValueOnce(childOnly())
+  getReadingSession.mockResolvedValue(handoffSession(role === 'child' ? 'CHILD_SOLO' : 'PARENT_CHILD'))
+  await wrapper.get('.child-handoff-loading button').trigger('click')
+  await flushPromises()
+  expect(location.hash).toBe(role === 'child' ? '#child/55' : '#reader/55')
+  expect(wrapper.find('.site-header').exists()).toBe(role === 'guardian')
+  expect(wrapper.find('.child-handoff-unlock').exists()).toBe(role === 'child')
+  expect(getReadingSession).toHaveBeenLastCalledWith(55)
+  expect(updateReadingMode).toHaveBeenCalledOnce()
+  expect(parentUnlock).not.toHaveBeenCalled()
+})
+
+it.each(['child', 'guardian'])('reconciles a lost unlock response using only reads before restoring the %s', async role => {
+  listProfiles.mockRejectedValueOnce(childOnly())
+  getReadingSession.mockResolvedValue(handoffSession('CHILD_SOLO'))
+  getStoryVersion.mockResolvedValue(book)
+  await open('child/55')
+  const form = wrapper.get('.child-handoff-unlock')
+  await form.get('[autocomplete="username"]').setValue('parent-a')
+  await form.get('[type="password"]').setValue('password123')
+  parentUnlock.mockImplementationOnce(async () => {
+    if (role === 'guardian') document.cookie = 'zhiya_csrf=fixture-after-unlock; path=/'
+    throw uncertainDelete()
+  })
+  listProfiles.mockRejectedValueOnce(offline())
+  await form.trigger('submit')
+  await flushPromises()
+  expect(wrapper.find('.child-handoff-unlock').exists()).toBe(false)
+  expect(wrapper.get('.child-handoff-loading').text()).toContain('服务暂不可用')
+  let finishShelf
+  if (role === 'child') listProfiles.mockRejectedValueOnce(childOnly())
+  else listStorybooks.mockReturnValueOnce(new Promise(resolve => { finishShelf = resolve }))
+  await wrapper.get('.child-handoff-loading button').trigger('click')
+  await flushPromises()
+  if (role === 'guardian') {
+    document.cookie = 'zhiya_csrf=; Max-Age=0; path=/'
+    expect(wrapper.find('.child-handoff-unlock').exists()).toBe(false)
+    expect(wrapper.get('.account-person').text()).toContain('parent-a')
+    finishShelf([book])
+    await flushPromises()
+  }
+  expect(location.hash).toBe(role === 'child' ? '#child/55' : '#account/overview')
+  expect(wrapper.find('.child-handoff-unlock').exists()).toBe(role === 'child')
+  expect(parentUnlock).toHaveBeenCalledOnce()
+  expect(updateReadingMode).not.toHaveBeenCalled()
+})
+
+it('keeps an unlisted deletion actionable after a reload until the owner explicitly confirms it', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  listReadingSessions.mockResolvedValueOnce([historyRow(11, [1])])
+  deleteReadingSession.mockRejectedValueOnce(uncertainDelete())
+  getDeletionStatus.mockResolvedValue(true)
+  await open('account/growth')
+  await wrapper.get('.recent-item button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[role="dialog"]').text()).toContain('仍保存在当前账号')
+  await wrapper.get('.modal-close').trigger('click')
+  wrapper.unmount()
+  vi.resetModules()
+  await open('account/growth')
+  expect(wrapper.get('.account-data-error').text()).toContain('阅读记录 #11')
+  await wrapper.get('.account-data-error button').trigger('click')
+  await wrapper.get('[role="dialog"] button.primary').trigger('click')
+  await flushPromises()
+  expect(getDeletionStatus.mock.calls).toEqual([[11], [11]])
+  expect(deleteReadingSession).toHaveBeenCalledOnce()
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(deleteReadingSession.mock.calls).toEqual([[11], [11]])
+  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  expect(wrapper.find('.account-data-error').exists()).toBe(false)
+  expect(sessionStorage.getItem('zhiya.pendingSessionDeletes')).toBeNull()
+})
+
+it('finishes on an authoritative DELETE 404 even if the history refresh fails', async () => {
+  listReadingSessions.mockResolvedValueOnce([historyRow(11, [1])]).mockRejectedValueOnce(offline())
+  deleteReadingSession.mockRejectedValueOnce(missing())
+  await open('account/growth')
+  await wrapper.get('.recent-item button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  expect(wrapper.get('.account-data-error').text()).toContain('阅读记录暂未更新')
+  expect(getDeletionStatus).not.toHaveBeenCalled()
+  expect(deleteReadingSession).toHaveBeenCalledOnce()
+})
+
+it('discards deletion reminders saved for a different guardian', async () => {
+  sessionStorage.setItem('zhiya.pendingSessionDeletes', JSON.stringify({ account: 'parent-a', ids: [11] }))
+  localStorage.setItem('zhiya.account', 'parent-b')
+  await open('account/growth')
+  expect(wrapper.text()).not.toContain('阅读记录 #11')
+  expect(sessionStorage.getItem('zhiya.pendingSessionDeletes')).toBeNull()
+})
+
+it.each([undefined, 'unavailable'])('retains an unlisted deletion if the status lookup is %s', async result => {
+  listReadingSessions.mockResolvedValueOnce([historyRow(11, [1])])
+  deleteReadingSession.mockRejectedValueOnce(uncertainDelete())
+  if (result === 'unavailable') getDeletionStatus.mockRejectedValueOnce(offline())
+  else getDeletionStatus.mockResolvedValueOnce(result)
+  await open('account/growth')
+  await wrapper.get('.recent-item button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[role="dialog"] button.danger').exists()).toBe(false)
+  await wrapper.get('[role="dialog"] button.primary').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  expect(deleteReadingSession).toHaveBeenCalledOnce()
+})
+
+it.each([
+  ['204', 7], ['204', 8], ['unknown', 7], ['unknown', 8],
+])('closes only the deleted profile draft after %s when editing #%i', async (reply, editedId) => {
+  const profiles = [{ childProfileId: 7, nickname: '小芽' }, { childProfileId: 8, nickname: '小禾' }]
+  listProfiles.mockResolvedValueOnce(profiles).mockResolvedValue([profiles[1]])
+  if (reply === 'unknown') deleteProfile.mockRejectedValueOnce(uncertainDelete())
+  await open('account/children')
+  const editingCard = wrapper.findAll('.child-card').find(card => card.text().includes('档案 #' + editedId))
+  await editingCard.findAll('button').find(button => button.text() === '编辑').trigger('click')
+  await wrapper.get('form.profile-form input').setValue('未保存的草稿')
+  await wrapper.get('.child-card button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('form.profile-form').exists()).toBe(editedId === 8)
+  if (editedId === 8) expect(wrapper.get('form.profile-form input').element.value).toBe('未保存的草稿')
   expect(deleteProfile).toHaveBeenCalledOnce()
 })

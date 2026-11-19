@@ -22,6 +22,11 @@ export async function getReadingSession(sessionId) {
   return result.data
 }
 
+export async function getDeletionStatus(sessionId) {
+  const result = await apiRequest(`/reading-sessions/${sessionId}?view=deletion-status`, { cache: 'no-store' })
+  return result?.data?.exists
+}
+
 export async function addReadingEvent(sessionId, payload) {
   const result = await apiRequest(`/reading-sessions/${sessionId}/events`, {
     method: 'POST',

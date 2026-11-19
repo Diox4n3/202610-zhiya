@@ -8,6 +8,7 @@ import {
   completeReadingSession,
   createReadingSession,
   deleteReadingSession,
+  getDeletionStatus,
   getReadingSession,
   listReadingSessions,
   updateReadingMode,
@@ -15,6 +16,7 @@ import {
 import { previewBooks, mapApiBook } from '../data/preview'
 
 const CHILD_SESSION_KEY = 'zhiya.childHandoffSessionId'
+const PENDING_SESSION_DELETES = 'zhiya.pendingSessionDeletes'
 
 function parseRoute(hash = location.hash) {
   const parts = hash.replace(/^#/, '').split('/').filter(Boolean)
@@ -99,6 +101,7 @@ function clearAccountViews() {
   state.sessionsLoaded = false
   state.sessionsError = ''
   for (const ids of Object.values(state.pendingDeletionChecks)) ids.clear()
+  sessionStorage.removeItem(PENDING_SESSION_DELETES)
   state.currentBook = null
   state.currentSession = null
   state.currentEvents = []
@@ -322,12 +325,25 @@ function syncStoredIdentity(event) {
   }
 }
 
+function beginHandoffCheck(sessionId, { resumeReader = false, account = state.auth.account } = {}) {
+  authEpoch += 1
+  knownCsrf = readCsrfCookie()
+  clearAccountViews()
+  rememberChildSession(sessionId)
+  state.auth = {
+    ...state.auth, account, status: 'verifying-handoff', authenticated: false, role: null, accountId: null,
+    resumeReaderId: resumeReader ? sessionId : null,
+  }
+  replaceRoute(sessionId ? `child/${sessionId}` : 'child')
+}
+
 async function refreshIdentity() {
   if (state.auth.status === 'signing-out') return
   invalidateChangedIdentity()
   const epoch = authEpoch
   const previous = state.auth.status
-  if (previous === 'child' || previous === 'handoff') state.activeProfileId = savedProfileId()
+  const verifying = previous === 'verifying-handoff'
+  if (previous === 'child' || previous === 'handoff' || verifying) state.activeProfileId = savedProfileId()
   try {
     const profiles = await loadProfiles()
     if (!profiles || epoch !== authEpoch) return
@@ -338,25 +354,39 @@ async function refreshIdentity() {
     state.currentBook = null
     state.sessionLoading = false
     state.auth.accountId = null
-    state.auth.account = localStorage.getItem('zhiya.account') || ''
+    state.auth.account = localStorage.getItem('zhiya.account') || (verifying ? state.auth.account : '')
+    if (verifying && state.auth.account) localStorage.setItem('zhiya.account', state.auth.account)
     state.auth.status = 'authenticated'
     state.auth.authenticated = true
     state.auth.role = 'GUARDIAN'
+    restorePendingSessionDeletes()
+    const readerId = state.auth.resumeReaderId
+    delete state.auth.resumeReaderId
+    if (state.route.name === 'child') {
+      replaceRoute(readerId ? `reader/${readerId}` : 'account/overview')
+      await Promise.all([loadBooks(), handleRoute()])
+      return
+    }
     await loadBooks()
+    if (epoch !== authEpoch) return
   } catch (error) {
     if (epoch !== authEpoch) return
     const remembered = savedChildSessionId()
-    const hasHandoff = remembered || state.route.name === 'child' || previous === 'child' || previous === 'handoff'
+    const hasHandoff = remembered || state.route.name === 'child' || previous === 'child' || previous === 'handoff' || verifying
     // API-004 also returns 401 once a child's reading time expires. Only API-021
     // can distinguish that still-unlockable credential from a signed-out device.
-    if (error.status === 403 || (hasHandoff && (error.status === 401 || previous === 'checking' || previous === 'unavailable'))) {
-      const status = error.status === 403 ? 'child' : 'handoff'
+    const isChild = error.status === 403 && error.code === 'FORBIDDEN'
+    if (isChild || (hasHandoff && error.status === 401)) {
+      const status = isChild ? 'child' : 'handoff'
       if (previous !== status || (state.childMode && remembered && state.childMode.sessionId !== remembered)) {
         authEpoch += 1
         clearAccountViews()
       }
       state.profilesError = ''
-      state.auth = { ...state.auth, status, authenticated: false, role: status === 'child' ? 'CHILD' : null, accountId: null }
+      state.auth = { ...state.auth, status, authenticated: false, role: isChild ? 'CHILD' : null, accountId: null }
+      delete state.auth.resumeReaderId
+    } else if (hasHandoff && (verifying || previous === 'checking' || previous === 'unavailable')) {
+      state.auth.status = 'verifying-handoff'
     } else if (error.status === 401) {
       if (previous === 'anonymous') {
         state.profilesError = ''
@@ -494,6 +524,34 @@ function applySessionRemoval(sessionId) {
   if (wasLoading) void loadSessions()
 }
 
+function markSessionDelete(id, pending) {
+  const ids = state.pendingDeletionChecks.session
+  if (pending) ids.add(id)
+  else ids.delete(id)
+  if (state.auth.account && ids.size) {
+    sessionStorage.setItem(PENDING_SESSION_DELETES, JSON.stringify({ account: state.auth.account, ids: [...ids] }))
+  } else {
+    sessionStorage.removeItem(PENDING_SESSION_DELETES)
+  }
+}
+
+function restorePendingSessionDeletes() {
+  const saved = sessionStorage.getItem(PENDING_SESSION_DELETES)
+  if (!saved) return
+  try {
+    const { account, ids } = JSON.parse(saved)
+    if (account && account === state.auth.account && Array.isArray(ids)) {
+      for (const id of ids) {
+        if (Number.isSafeInteger(id) && id > 0) state.pendingDeletionChecks.session.add(id)
+      }
+      return
+    }
+  } catch {
+    // Ignore incomplete data from an older browser session.
+  }
+  sessionStorage.removeItem(PENDING_SESSION_DELETES)
+}
+
 async function checkDeletion(type, id) {
   const epoch = authEpoch
   let present
@@ -505,18 +563,26 @@ async function checkDeletion(type, id) {
   } else {
     if (!await loadSessions() || epoch !== authEpoch) return 'unconfirmed'
     present = state.sessions.some(session => session.readingSessionId === id)
-    if (!present) applySessionRemoval(id)
+    if (!present) {
+      // API-012 also omits sessions whose book was withdrawn.
+      const exists = await getDeletionStatus(id)
+      if (epoch !== authEpoch || typeof exists !== 'boolean') return 'unconfirmed'
+      if (exists) return 'unlisted'
+      applySessionRemoval(id)
+    }
   }
-  state.pendingDeletionChecks[type].delete(id)
+  if (type === 'session') markSessionDelete(id, false)
+  else state.pendingDeletionChecks.profile.delete(id)
   if (present) return 'present'
-  setToast(type === 'profile' ? '已确认儿童档案不在当前列表中' : '已确认阅读记录不在当前列表中')
+  setToast(type === 'profile' ? '已确认儿童档案不在当前列表中' : '已确认这条阅读记录已不存在')
   return 'absent'
 }
 
 function handleDeleteError(error, type, id, epoch) {
   if (epoch !== authEpoch) return false
   if (error.code !== 'REQUEST_OUTCOME_UNKNOWN' && error.status !== 404) throw error
-  state.pendingDeletionChecks[type].add(id)
+  if (type === 'session') markSessionDelete(id, true)
+  else state.pendingDeletionChecks.profile.add(id)
   return 'unconfirmed'
 }
 
@@ -539,22 +605,26 @@ async function removeProfile(profileId) {
   }
 }
 
-async function removeReadingSession(sessionId) {
+async function removeReadingSession(sessionId, confirmedUnlisted = false) {
   if (state.sessionDeleteBusyId !== null) return false
-  if (state.pendingDeletionChecks.session.has(sessionId)) return 'unconfirmed'
+  if (state.pendingDeletionChecks.session.has(sessionId) && !confirmedUnlisted) return 'unconfirmed'
   const epoch = authEpoch
   state.sessionDeleteBusyId = sessionId
+  let alreadyAbsent = false
   try {
     await deleteReadingSession(sessionId)
-    if (epoch !== authEpoch) return false
-    applySessionRemoval(sessionId)
-    setToast('阅读记录已删除')
-    return true
   } catch (error) {
-    return handleDeleteError(error, 'session', sessionId, epoch)
+    alreadyAbsent = error.status === 404 && error.code === 'RESOURCE_NOT_FOUND'
+    if (!alreadyAbsent) return handleDeleteError(error, 'session', sessionId, epoch)
   } finally {
     if (epoch === authEpoch) state.sessionDeleteBusyId = null
   }
+  if (epoch !== authEpoch) return false
+  markSessionDelete(sessionId, false)
+  applySessionRemoval(sessionId)
+  if (alreadyAbsent && !state.sessionsLoading) void loadSessions()
+  setToast(alreadyAbsent ? '已确认这条阅读记录已不存在' : '阅读记录已删除')
+  return true
 }
 
 function selectBook(bookId) {
@@ -721,6 +791,7 @@ async function startCurrentReading() {
 
 async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSeconds) {
   const session = state.currentSession
+  const book = state.currentBook
   if (!session || session.preview || session.readingSessionId !== sessionId || session.status !== 'CREATED'
       || session.mode !== 'PARENT_CHILD' || !state.auth.authenticated || state.sessionBusy) {
     return false
@@ -748,17 +819,13 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
     } catch (error) {
       if (epoch !== authEpoch) return false
       if (error.status !== 403 || error.code !== 'FORBIDDEN') {
-        // The write succeeded. Until identity can be checked, offer password unlock only.
-        rememberChildSession(sessionId)
-        authEpoch += 1
-        clearAccountViews()
-        state.auth = { ...state.auth, status: 'handoff', authenticated: false, role: null, accountId: null }
-        replaceRoute(`child/${sessionId}`)
+        beginHandoffCheck(sessionId)
+        if (error.status === 401) state.auth.status = 'handoff'
+        else state.profilesError = describeApiError(error)
         return true
       }
     }
     authEpoch += 1
-    const book = state.currentBook
     clearAccountViews()
     state.currentBook = book
     state.currentSession = {
@@ -779,7 +846,13 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
     setToast('儿童阅读模式已开启，请交给儿童端继续')
     return true
   } catch (error) {
-    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
+    if (epoch !== authEpoch) return false
+    if (error.code === 'REQUEST_OUTCOME_UNKNOWN') {
+      beginHandoffCheck(sessionId, { resumeReader: true })
+      await refreshIdentity()
+      return true
+    }
+    setToast(describeApiError(error), 'error')
     return false
   } finally {
     if (epoch === authEpoch) state.sessionBusy = false
@@ -820,7 +893,7 @@ async function restoreChildMode(sessionId) {
 }
 
 async function unlockChildMode(account, password) {
-  if (state.sessionBusy) return false
+  if (state.sessionBusy || !['child', 'handoff'].includes(state.auth.status)) return false
   let epoch = authEpoch
   state.sessionBusy = true
   try {
@@ -848,7 +921,16 @@ async function unlockChildMode(account, password) {
     }
     return true
   } catch (error) {
-    if (epoch === authEpoch && error.status === 401 && error.code === 'AUTH_REQUIRED') {
+    if (epoch !== authEpoch) return false
+    if (error.code === 'REQUEST_OUTCOME_UNKNOWN' || (error.status === 403 && error.code === 'FORBIDDEN')) {
+      const csrf = readCsrfCookie()
+      const credentialChanged = csrf && csrf !== knownCsrf && error.code === 'REQUEST_OUTCOME_UNKNOWN'
+      const sessionId = state.childMode?.sessionId || savedChildSessionId() || state.route.sessionId
+      beginHandoffCheck(sessionId, { account: credentialChanged ? account : state.auth.account })
+      await refreshIdentity()
+      return true
+    }
+    if (error.status === 401 && error.code === 'AUTH_REQUIRED') {
       resetAuthentication()
       replaceRoute('auth')
       setToast('设备凭证已失效，请重新登录。', 'error')
@@ -1058,7 +1140,7 @@ async function loadSessions() {
 
 async function handleRoute() {
   updateBodyView()
-  if (state.auth.status === 'child' || state.auth.status === 'handoff') {
+  if (['child', 'handoff', 'verifying-handoff'].includes(state.auth.status)) {
     const rememberedSessionId = state.childMode?.sessionId || savedChildSessionId()
     const sessionId = rememberedSessionId || state.route.sessionId || null
     if (

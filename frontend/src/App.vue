@@ -62,6 +62,9 @@ onBeforeUnmount(() => {
     :book="state.currentBook"
     :auth="state.auth"
     :loading="state.sessionLoading"
+    :identity-loading="state.profilesLoading"
+    :identity-error="state.profilesError"
+    @recheck-identity="zhiyaActions.refreshIdentity"
     :unlock-action="zhiyaActions.unlockChildMode"
   />
   <div v-else :key="state.accountViewKey" class="app">
