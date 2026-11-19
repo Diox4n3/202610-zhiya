@@ -24,7 +24,7 @@ const props = defineProps({
   reloadAccountDataAction: { type: Function, default: async () => false },
 })
 
-const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start', 'reload-sessions'])
+const emit = defineEmits(['navigate', 'detail', 'select-profile', 'sign-out', 'start', 'reload-sessions'])
 const editing = ref(false)
 const saving = ref(false)
 const saveError = ref('')
@@ -288,7 +288,7 @@ async function confirmDelete() {
             <article v-for="book in books" :key="book.id" class="shelf-card">
               <img :src="book.cover" :alt="`${book.title}封面`">
               <h2>{{ book.title }}</h2><p>{{ book.ageLabel }}</p>
-              <button class="secondary" type="button" @click="emit('navigate', `detail/${book.storyVersionId}`)">查看详情</button>
+              <button class="secondary" type="button" @click="emit('detail', book)">查看详情</button>
             </article>
           </div>
         </template>

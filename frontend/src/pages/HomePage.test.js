@@ -18,9 +18,48 @@ const render = (selectedBookId = '') => mount(HomePage, {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 describe('home featured book', () => {
+  it('motion preference: respects reduced motion and live preference changes', async () => {
+    vi.useFakeTimers()
+    const preference = { matches: true }
+    const matchMedia = vi.fn(() => preference)
+    vi.stubGlobal('matchMedia', matchMedia)
+    const wrapper = render()
+    const title = wrapper.get('.home-info-card h2')
+    try {
+      expect(matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)')
+      await vi.advanceTimersByTimeAsync(3600)
+      expect(title.text()).toBe('第一本')
+
+      await wrapper.get('.shelf-arrow-hit.next').trigger('click')
+      expect(wrapper.emitted('select')?.at(-1)).toEqual(['book-2'])
+      preference.matches = false
+      await vi.advanceTimersByTimeAsync(3600)
+      expect(title.text()).toBe('第二本')
+
+      preference.matches = true
+      await vi.advanceTimersByTimeAsync(7200)
+      expect(title.text()).toBe('第二本')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('motion preference: keeps automatic rotation available without matchMedia', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('matchMedia', undefined)
+    const wrapper = render()
+    try {
+      await vi.advanceTimersByTimeAsync(3600)
+      expect(wrapper.get('.home-info-card h2').text()).toBe('第二本')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('cycles the open-book cover and information until the reader selects a book', async () => {
     vi.useFakeTimers()
     const wrapper = render()

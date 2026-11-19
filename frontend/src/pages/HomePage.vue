@@ -17,6 +17,7 @@ const autoIndex = ref(0)
 const hoveringBooks = ref(false)
 const focusWithin = ref(false)
 let autoTimer = null
+let motionPreference
 const AUTO_BOOK_INTERVAL = 3600
 
 const manualIndex = computed(() => props.books.findIndex((book) => book.id === props.selectedBookId))
@@ -30,7 +31,7 @@ const shelfBooks = computed(() => {
 })
 
 function advanceAutoBook() {
-  if (manualIndex.value >= 0 || props.books.length < 2 || document.hidden || hoveringBooks.value || focusWithin.value) return
+  if (motionPreference?.matches || manualIndex.value >= 0 || props.books.length < 2 || document.hidden || hoveringBooks.value || focusWithin.value) return
   autoIndex.value = (autoIndex.value + 1) % props.books.length
 }
 
@@ -40,6 +41,9 @@ watch(() => props.books.length, (length) => {
 })
 
 onMounted(() => {
+  motionPreference = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null
   autoTimer = window.setInterval(advanceAutoBook, AUTO_BOOK_INTERVAL)
 })
 

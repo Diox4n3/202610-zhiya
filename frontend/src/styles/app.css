@@ -1574,6 +1574,13 @@
       .account-layout { grid-template-columns: 214px minmax(0, 1fr); }
     }
 
+    @media (900px < width <= 1180px) {
+      .home-page { height: auto; min-height: 0; overflow: visible; padding-bottom: 28px; }
+      .home-hero { flex: none; }
+      .home-bottom { flex: none; margin-top: 24px; }
+      .home-plan { transform: none; }
+    }
+
     @media (max-width: 900px) {
       .header-inner { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-block: 10px; }
       .site-header { height: auto; }

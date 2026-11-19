@@ -323,6 +323,136 @@ it('refreshes the cold-start shelf when the withdrawn detail 404 arrives after l
   expect(listStorybooks.mock.calls).toEqual([[shelfQuery], [shelfQuery]])
 })
 
+it('shelf coherence: refreshes the old shelf after switching from withdrawn detail 88 to detail 89', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  const availableBook = { ...book, storyVersionId: 89, title: '仍可阅读的绘本' }
+  let finishOldList
+  let rejectDetails
+  listStorybooks.mockReturnValueOnce(new Promise((resolve) => { finishOldList = resolve }))
+    .mockResolvedValueOnce([availableBook])
+  getStoryVersion.mockReturnValueOnce(new Promise((_, reject) => { rejectDetails = reject }))
+    .mockResolvedValueOnce(availableBook)
+  await open('detail/88')
+  expect(getStoryVersion.mock.calls).toEqual([[88]])
+
+  window.history.replaceState({}, '', '/#detail/89')
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  await flushPromises()
+  expect(getStoryVersion.mock.calls).toEqual([[88], [89]])
+  expect(wrapper.get('.detail-card h1').text()).toBe(availableBook.title)
+
+  rejectDetails(missing())
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 1])
+  expect(wrapper.get('.detail-card h1').text()).toBe(availableBook.title)
+  expect(wrapper.text()).not.toContain('资源不可用')
+
+  finishOldList([book, availableBook])
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(availableBook.title))
+  expect(wrapper.getComponent({ name: 'BookCarousel' }).props('books').map(({ storyVersionId }) => storyVersionId))
+    .toEqual([89])
+})
+
+it('superseded detail 404 keeps the same book after a newer detail request succeeds', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  let rejectOldDetails
+  getStoryVersion.mockReturnValueOnce(new Promise((_, reject) => { rejectOldDetails = reject }))
+    .mockResolvedValueOnce(book)
+  await open('detail/88')
+  expect(getStoryVersion.mock.calls).toEqual([[88]])
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(book.title))
+  await wrapper.findAll('button').find((button) => button.text() === '查看详情').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.detail-card h1').text()).toBe(book.title))
+  expect(getStoryVersion.mock.calls).toEqual([[88], [88]])
+
+  rejectOldDetails(missing())
+  await flushPromises()
+  expect(listStorybooks).toHaveBeenCalledTimes(1)
+  expect(wrapper.get('.detail-card h1').text()).toBe(book.title)
+  expect(wrapper.text()).not.toContain('资源不可用')
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(book.title))
+  expect(wrapper.getComponent({ name: 'BookCarousel' }).props('books').map(({ storyVersionId }) => storyVersionId))
+    .toEqual([88])
+  expect(wrapper.text()).not.toContain('资源不可用')
+})
+
+it('shelf coherence: refreshes after leaving detail while the same shelf restores its second page', async () => {
+  const releaseSecondPage = holdBookshelfPage(2)
+  let finishFirstPage
+  let rejectDetails
+  listStorybooks.mockReturnValueOnce(new Promise((resolve) => { finishFirstPage = resolve }))
+  getStoryVersion.mockReturnValueOnce(new Promise((_, reject) => { rejectDetails = reject }))
+  await open('detail/88')
+  expect(getStoryVersion.mock.calls).toEqual([[88]])
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.find('.library-page').exists()).toBe(true))
+  finishFirstPage([book, ...firstPage.slice(1)])
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2])
+  const shelfVersions = () => wrapper.getComponent({ name: 'BookCarousel' }).props('books')
+    .map(({ storyVersionId }) => storyVersionId)
+  expect(shelfVersions()).toContain(88)
+
+  rejectDetails(missing())
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 1, 2])
+  expect(shelfVersions()).not.toContain(88)
+  expect(wrapper.text()).not.toContain('资源不可用')
+
+  releaseSecondPage()
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 1, 2, 3])
+  expect(shelfVersions()).not.toContain(88)
+  expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63')
+})
+
+it('shelf coherence: rechecks the pending shelf when reading creation returns 404 for a valid profile', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  listProfiles.mockResolvedValue([{ childProfileId: 7 }])
+  const availableBook = { ...book, storyVersionId: 89, title: '仍可阅读的绘本' }
+  let finishOldList
+  listStorybooks.mockReturnValueOnce(new Promise((resolve) => { finishOldList = resolve }))
+    .mockResolvedValueOnce([availableBook])
+  getStoryVersion.mockResolvedValueOnce(book)
+  createReadingSession.mockRejectedValueOnce(missing())
+  await open('detail/88')
+  expect(wrapper.get('.detail-card h1').text()).toBe(book.title)
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1])
+
+  await wrapper.get('.detail-actions .primary').trigger('click')
+  await flushPromises()
+  expect(createReadingSession.mock.calls).toEqual([[{ storyVersionId: 88, childProfileId: 7 }]])
+  expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 1])
+
+  finishOldList([book, availableBook])
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(availableBook.title))
+  expect(wrapper.getComponent({ name: 'BookCarousel' }).props('books').map(({ storyVersionId }) => storyVersionId))
+    .toEqual([89])
+})
+
+it('shelf coherence: preserves a different saved book on page three after a detail 404', async () => {
+  const releaseSecondPage = holdBookshelfPage(2)
+  getStoryVersion.mockRejectedValueOnce(missing())
+  await open('detail/88')
+  expect(wrapper.get('.detail-page .empty-state h2').text()).toBe('绘本暂不可用')
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 1, 2])
+
+  releaseSecondPage()
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 1, 2, 3])
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63'))
+  expect(localStorage.getItem('zhiya.selectedBookId')).toBe('version-63')
+})
+
 it.each([
   ['detail', false], ['detail', true], ['start', true],
 ])('recovers a withdrawn book’s shifted neighbour via %s (end already seen: %s)', async (entry, endSeen) => {

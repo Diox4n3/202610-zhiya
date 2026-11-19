@@ -23,7 +23,10 @@ function parseRoute(hash = location.hash) {
   const name = parts[0] || 'home'
   if (name === 'account') return { name, section: parts[1] || 'overview' }
   if (name === 'child') return { name, sessionId: Number(parts[1]) || null }
-  if (name === 'detail') return { name, versionId: Number(parts[1]) || null }
+  if (name === 'detail') {
+    const source = ['api', 'preview'].includes(parts[1]) ? parts[1] : null
+    return { name, source, versionId: Number(parts[source ? 2 : 1]) || null }
+  }
   if (name === 'reader' && parts[1] === 'preview') return { name, previewVersionId: Number(parts[2]) || null }
   if (name === 'reader') return { name, sessionId: Number(parts[1]) || null }
   if (['library', 'auth'].includes(name)) return { name }
@@ -60,6 +63,7 @@ const state = reactive({
   nextBooksPage: null,
   bookFilters: { ageBand: '', topic: '' },
   selectedBookId: '',
+  manualBookId: '',
   currentBook: null,
   detailLoading: false,
   currentSession: null,
@@ -86,8 +90,11 @@ let knownCsrf = readCsrfCookie()
 let profilesRequest = 0
 let booksRequest = 0
 let firstShelfPage = null
+let previewFromEmptyCatalog = false
+let selectionRevision = 0
 let pendingBookRestore = null
 let detailRequest = 0
+const detailReadsByVersion = new Map()
 let sessionsRequest = 0
 let readingEpoch = 0
 let pendingReading = null
@@ -112,6 +119,7 @@ function clearAccountViews() {
   state.selectedBookId = ''
   firstShelfPage = null
   pendingBookRestore = null
+  detailReadsByVersion.clear()
   profilesRequest += 1
   booksRequest += 1
   sessionsRequest += 1
@@ -188,13 +196,14 @@ function applyBooks(items, source, message = '') {
   state.books = items
   state.booksSource = source
   state.booksError = message
+  state.manualBookId = localStorage.getItem(bookSelectionKey(source)) || ''
   if (source === 'preview' || !items.some((book) => book.id === state.selectedBookId)) {
-    const saved = localStorage.getItem(bookSelectionKey(source))
-    state.selectedBookId = items.find((book) => book.id === saved)?.id || ''
+    state.selectedBookId = items.find((book) => book.id === state.manualBookId)?.id || ''
   }
 }
 
-function loadPreviewBooks(message = '') {
+function loadPreviewBooks(message = '', emptyCatalog = false) {
+  previewFromEmptyCatalog = emptyCatalog
   state.nextBooksPage = null
   const { ageBand, topic } = state.bookFilters
   const filtered = previewBooks.filter((book) => {
@@ -215,6 +224,8 @@ function loadBooks(filters = {}, restoreBookId = null) {
 async function fetchBooksPage(page) {
   const epoch = authEpoch
   const request = ++booksRequest
+  const selectionAtStart = selectionRevision
+  if (page === 1) previewFromEmptyCatalog = false
   const pageSize = 30
   const keepSelection = pendingBookRestore !== null || Boolean(state.booksError && state.selectedBookId)
   state.booksLoading = true
@@ -239,11 +250,11 @@ async function fetchBooksPage(page) {
       const existing = new Set(state.books.map((book) => book.storyVersionId))
       const added = items.filter((book) => !existing.has(book.storyVersionId)).map(mapApiBook)
       applyBooks([...state.books, ...added], 'api')
-      if (!keepSelection && added.length && !added.some((book) => book.id === state.selectedBookId)) {
+      if (!keepSelection && selectionAtStart === selectionRevision && added.length && !added.some((book) => book.id === state.selectedBookId)) {
         state.selectedBookId = added[0].id
       }
     } else if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
-      loadPreviewBooks('后端当前没有可见的已发布绘本，当前展示本地设计预览。')
+      loadPreviewBooks('后端当前没有可见的已发布绘本，当前展示本地设计预览。', true)
     } else {
       applyBooks(items.map(mapApiBook), 'api')
     }
@@ -285,11 +296,6 @@ function loadMoreBooks() {
 }
 
 function refreshShelfAfterNotFound() {
-  pendingBookRestore = null
-  if (state.booksLoading && state.nextBooksPage === null) {
-    // The old shelf may still be visible while a new filter's first page loads.
-    return loadBooks()
-  }
   state.nextBooksPage = 1
   return fetchBooksPage(1)
 }
@@ -658,55 +664,56 @@ async function removeReadingSession(sessionId, confirmedUnlisted = false) {
 
 function selectBook(bookId) {
   if (!state.books.some((book) => book.id === bookId)) return
+  selectionRevision += 1
   pendingBookRestore = null
   state.selectedBookId = bookId
+  state.manualBookId = bookId
   localStorage.setItem(bookSelectionKey(state.booksSource), bookId)
 }
 
 function openDetail(bookOrVersionId) {
   const versionId = Number(bookOrVersionId?.storyVersionId || bookOrVersionId)
-  if (versionId) navigate(`detail/${versionId}`)
+  const source = bookOrVersionId?.source
+  if (versionId) navigate(source ? `detail/${source}/${versionId}` : `detail/${versionId}`)
 }
 
-async function loadDetail(versionId) {
+async function loadDetail(id, source = null) {
+  const versionId = Number(id)
   const epoch = authEpoch
   const request = ++detailRequest
-  const shelfRequest = booksRequest
+  const filtersAtStart = state.bookFilters
   const route = location.hash
   const isCurrent = () => epoch === authEpoch && request === detailRequest && route === location.hash
   state.detailLoading = true
   state.currentBook = null
   try {
-    // A numeric detail link can identify either a demo or a server version.
-    // Only overlapping IDs need the first shelf page to decide which source to use.
-    if (firstShelfPage && state.booksSource === 'preview' && previewBooks.some((book) => book.storyVersionId === versionId)) {
-      await firstShelfPage.catch(() => {}) // The shelf handles failures and chooses its fallback.
+    const preview = previewBooks.find((book) => book.storyVersionId === versionId)
+    // Legacy numeric links may refer to a demo when the server has confirmed an empty catalog.
+    if (!source && preview && firstShelfPage && state.booksSource === 'preview') {
+      await firstShelfPage.catch(() => {})
       if (!isCurrent()) return
     }
-    const cached = state.books.find((book) => book.storyVersionId === Number(versionId))
-    if (cached?.source === 'preview') {
-      state.currentBook = cached
+    if (source === 'preview' || (!source && preview && (!state.auth.authenticated || previewFromEmptyCatalog))) {
+      state.currentBook = preview || null
       return
     }
-    const version = await getStoryVersion(Number(versionId))
+    detailReadsByVersion.set(versionId, request)
+    const version = await getStoryVersion(versionId)
     if (!isCurrent()) return
     state.currentBook = mapApiBook(version)
   } catch (error) {
-    if (epoch !== authEpoch || request !== detailRequest) return
-    // After leaving the detail page, a 404 can still invalidate the same shelf request.
-    if (route !== location.hash && (error.status !== 404 || shelfRequest !== booksRequest)) return
-    if (error.status === 404 && state.booksSource === 'api') {
-      const remaining = state.books.filter((book) => book.storyVersionId !== Number(versionId))
-      const removed = remaining.length < state.books.length
-      applyBooks(remaining, 'api')
-      if (removed || state.booksLoading) void refreshShelfAfterNotFound()
-    } else if (error.status === 404 && state.booksLoading) {
-      // The first API shelf request predates the 404. Replace it while keeping any saved selection.
-      void fetchBooksPage(1)
+    if (epoch !== authEpoch) return
+    // A different detail page can use this shelf too. Only a newer read of this version supersedes its 404.
+    if (error.status === 404 && state.bookFilters === filtersAtStart && detailReadsByVersion.get(versionId) === request) {
+      const remaining = state.books.filter((book) => book.storyVersionId !== versionId)
+      const listed = state.booksSource === 'api' && remaining.length < state.books.length
+      if (listed) applyBooks(remaining, 'api')
+      if (listed || state.booksLoading) void refreshShelfAfterNotFound()
     }
-    if (route === location.hash) setToast(describeApiError(error), 'error')
+    if (isCurrent()) setToast(describeApiError(error), 'error')
   } finally {
-    if (isCurrent()) state.detailLoading = false
+    if (detailReadsByVersion.get(versionId) === request) detailReadsByVersion.delete(versionId)
+    if (epoch === authEpoch && request === detailRequest) state.detailLoading = false
   }
 }
 
@@ -760,7 +767,7 @@ async function startReading(book) {
         setToast(profiles.length ? '原儿童档案已失效，请到个人中心重新选择儿童档案。' : '原儿童档案已失效，请先添加儿童档案。', 'error')
         return
       }
-      if (state.booksSource === 'api' && state.bookFilters === filtersAtStart) void refreshShelfAfterNotFound()
+      if (state.bookFilters === filtersAtStart) void refreshShelfAfterNotFound()
     }
     setToast(describeApiError(error), 'error')
   } finally {
@@ -1203,7 +1210,7 @@ async function handleRoute() {
       await loadBooks()
     }
   } else if (route.name === 'detail' && route.versionId) {
-    await loadDetail(route.versionId)
+    await loadDetail(route.versionId, route.source)
   } else if (route.name === 'reader') {
     await loadReaderRoute()
   } else if (route.name === 'child') {

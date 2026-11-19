@@ -31,11 +31,6 @@ async function startBook(book) {
   }
 }
 
-function openDetail(book) {
-  if (!book?.storyVersionId) return
-  zhiyaActions.navigate(`detail/${book.storyVersionId}`)
-}
-
 function onHashChange() {
   zhiyaActions.syncRoute()
 }
@@ -84,13 +79,13 @@ onBeforeUnmount(() => {
     <HomePage
       v-else-if="state.route.name === 'home'"
       :books="state.books"
-      :selected-book-id="state.selectedBookId"
+      :selected-book-id="state.manualBookId"
       :active-profile="activeProfile()"
       :auth="state.auth"
       :books-source="state.booksSource"
       :books-error="state.booksError"
       @select="zhiyaActions.selectBook"
-      @detail="openDetail"
+      @detail="zhiyaActions.openDetail"
       @start="startBook"
       @navigate="zhiyaActions.navigate"
     />
@@ -103,7 +98,7 @@ onBeforeUnmount(() => {
       :source="state.booksSource"
       :error="state.booksError"
       @select="zhiyaActions.selectBook"
-      @detail="openDetail"
+      @detail="zhiyaActions.openDetail"
       @start="startBook"
       @filter="zhiyaActions.loadBooks"
       @more="zhiyaActions.loadMoreBooks"
@@ -129,7 +124,7 @@ onBeforeUnmount(() => {
       :refresh-reading="zhiyaActions.refreshReading"
       :available-books="state.books.filter((book) => book.source === 'api')"
       :enter-child-mode-action="zhiyaActions.enterChildMode"
-      @back="openDetail"
+      @back="zhiyaActions.openDetail"
       @library="zhiyaActions.navigate('library')"
       @start-session="zhiyaActions.startCurrentReading"
     />
@@ -149,6 +144,7 @@ onBeforeUnmount(() => {
       :loading="state.sessionsLoading"
       @navigate="zhiyaActions.navigate"
       @select-profile="zhiyaActions.selectProfile"
+      @detail="zhiyaActions.openDetail"
       :save-profile-action="handleProfileSave"
       :delete-profile-action="zhiyaActions.removeProfile"
       :delete-session-action="zhiyaActions.removeReadingSession"
@@ -162,13 +158,13 @@ onBeforeUnmount(() => {
     <HomePage
       v-else
       :books="state.books"
-      :selected-book-id="state.selectedBookId"
+      :selected-book-id="state.manualBookId"
       :active-profile="activeProfile()"
       :auth="state.auth"
       :books-source="state.booksSource"
       :books-error="state.booksError"
       @select="zhiyaActions.selectBook"
-      @detail="openDetail"
+      @detail="zhiyaActions.openDetail"
       @start="startBook"
       @navigate="zhiyaActions.navigate"
     />
