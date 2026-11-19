@@ -59,7 +59,7 @@ const state = reactive({
   booksError: '',
   nextBooksPage: null,
   bookFilters: { ageBand: '', topic: '' },
-  selectedBookId: localStorage.getItem('zhiya.selectedBookId') || previewBooks[0].id,
+  selectedBookId: '',
   currentBook: null,
   detailLoading: false,
   currentSession: null,
@@ -107,7 +107,7 @@ function clearAccountViews() {
   state.currentEvents = []
   state.currentReport = null
   state.bookFilters = { ageBand: '', topic: '' }
-  state.selectedBookId = previewBooks[0].id
+  state.selectedBookId = ''
   profilesRequest += 1
   booksRequest += 1
   sessionsRequest += 1
@@ -127,7 +127,7 @@ function resetAuthentication() {
   knownCsrf = readCsrfCookie()
   clearAccountViews()
   rememberChildSession(null)
-  for (const key of ['account', 'activeProfileId', 'selectedBookId', 'plan', 'guardianNickname']) {
+  for (const key of ['account', 'activeProfileId', 'selectedBookId', 'bookSelectionExplicit', 'plan', 'guardianNickname']) {
     localStorage.removeItem(`zhiya.${key}`)
   }
   state.auth = { status: 'anonymous', authenticated: false, role: 'GUARDIAN', accountId: null, account: '', nickname: '知芽家长' }
@@ -183,7 +183,7 @@ function applyBooks(items, source, message = '') {
   state.booksSource = source
   state.booksError = message
   if (!items.some((book) => book.id === state.selectedBookId)) {
-    state.selectedBookId = items[0]?.id || ''
+    state.selectedBookId = ''
   }
 }
 
@@ -630,7 +630,6 @@ async function removeReadingSession(sessionId, confirmedUnlisted = false) {
 function selectBook(bookId) {
   if (!state.books.some((book) => book.id === bookId)) return
   state.selectedBookId = bookId
-  localStorage.setItem('zhiya.selectedBookId', bookId)
 }
 
 function openDetail(bookOrVersionId) {

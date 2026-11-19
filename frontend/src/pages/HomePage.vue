@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { bookStatusLabel } from '../data/preview'
 
 const props = defineProps({
@@ -13,11 +13,16 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'detail', 'start', 'navigate'])
 const direction = ref(0)
+const autoIndex = ref(0)
+let autoTimer = null
+const AUTO_BOOK_INTERVAL = 3600
 
-const selected = computed(() =>
-  props.books.find((book) => book.id === props.selectedBookId) || props.books[0] || null,
+const manualSelected = computed(() =>
+  props.books.find((book) => book.id === props.selectedBookId) || null,
 )
-const selectedIndex = computed(() => Math.max(0, props.books.findIndex((book) => book.id === selected.value?.id)))
+const autoSelected = computed(() => props.books[autoIndex.value % Math.max(props.books.length, 1)] || null)
+const selected = computed(() => manualSelected.value || autoSelected.value)
+const selectedIndex = computed(() => Math.max(0, props.books.findIndex((book) => book.id === props.selectedBookId)))
 const shelfBooks = computed(() => {
   if (!props.books.length) return []
   return [-1, 0, 1, 2, 3].map((offset) =>
@@ -25,10 +30,27 @@ const shelfBooks = computed(() => {
   )
 })
 
+function advanceAutoBook() {
+  if (manualSelected.value || props.books.length < 2 || document.hidden) return
+  autoIndex.value = (autoIndex.value + 1) % props.books.length
+}
+
+watch(() => props.books.length, (length) => {
+  if (!length) autoIndex.value = 0
+  else autoIndex.value %= length
+})
+
+onMounted(() => {
+  autoTimer = window.setInterval(advanceAutoBook, AUTO_BOOK_INTERVAL)
+})
+
+onBeforeUnmount(() => window.clearInterval(autoTimer))
+
 function moveShelf(step) {
   if (!props.books.length) return
   direction.value = step
-  const nextIndex = (selectedIndex.value + step + props.books.length) % props.books.length
+  const currentIndex = manualSelected.value ? selectedIndex.value : autoIndex.value % props.books.length
+  const nextIndex = (currentIndex + step + props.books.length) % props.books.length
   emit('select', props.books[nextIndex].id)
   window.setTimeout(() => { direction.value = 0 }, 340)
 }
@@ -99,8 +121,8 @@ function chooseShelf(book) {
               <img v-if="book" :src="book.cover" :alt="`${book.title}封面`">
             </button>
           </div>
-          <button class="shelf-arrow-hit previous" type="button" aria-label="查看前面的绘本" @click="moveShelf(-1)">‹</button>
-          <button class="shelf-arrow-hit next" type="button" aria-label="查看后面的绘本" @click="moveShelf(1)">›</button>
+          <button class="shelf-arrow-hit previous" type="button" aria-label="查看前面的绘本" @click="moveShelf(-1)"><span class="arrow-glyph" aria-hidden="true">‹</span></button>
+          <button class="shelf-arrow-hit next" type="button" aria-label="查看后面的绘本" @click="moveShelf(1)"><span class="arrow-glyph" aria-hidden="true">›</span></button>
         </div>
       </section>
       <aside class="home-plan">

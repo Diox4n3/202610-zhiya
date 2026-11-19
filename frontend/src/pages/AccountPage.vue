@@ -195,7 +195,7 @@ async function confirmDelete() {
           <div><strong>{{ auth.nickname }}</strong><small>{{ auth.account || '本地预览账号' }}</small></div>
         </div>
         <button class="pill child-switch" type="button" @click="emit('navigate', 'account/children')">
-          <span>{{ activeProfile ? `${activeProfile.nickname || '宝贝'} · ${ageLabels[activeProfile.ageBand] || '年龄段暂缺'}` : profileAction }}</span><span>⌄</span>
+          <span>{{ activeProfile ? `${activeProfile.nickname || '宝贝'} · ${ageLabels[activeProfile.ageBand] || '年龄段暂缺'}` : profileAction }}</span><span class="child-switch-arrow" aria-hidden="true">⌄</span>
         </button>
         <nav class="account-nav" aria-label="个人中心功能">
           <button
