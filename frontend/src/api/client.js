@@ -12,8 +12,8 @@ export class ApiError extends Error {
   }
 }
 
-function readCookie(name) {
-  const prefix = `${encodeURIComponent(name)}=`
+export function readCsrfCookie() {
+  const prefix = 'zhiya_csrf='
   return document.cookie
     .split(';')
     .map((part) => part.trim())
@@ -33,7 +33,7 @@ export async function apiRequest(path, options = {}) {
     body = JSON.stringify(body)
   }
   if (!['GET', 'HEAD'].includes(method)) {
-    const csrf = decodeURIComponent(readCookie('zhiya_csrf'))
+    const csrf = decodeURIComponent(readCsrfCookie())
     if (csrf) headers.set('X-CSRF-Token', csrf)
   }
 

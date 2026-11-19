@@ -335,7 +335,7 @@ function leaveReader() {
 }
 
 function openChildMode() {
-  if (props.session?.preview || props.session?.status !== 'CREATED') return
+  if (!props.authenticated || props.session?.preview || props.session?.status !== 'CREATED' || props.session.mode !== 'PARENT_CHILD') return
   childMinutes.value = 10
   childAllowedVersions.value = props.book?.storyVersionId ? [props.book.storyVersionId] : []
   childModeOpen.value = true
@@ -442,16 +442,16 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
           <h2>给家长的共读提示</h2>
           <p>{{ session.preview ? currentPage?.answer : '可以和孩子一起阅读当前页。个性化共读提示尚未接入。' }}</p>
         </section>
-        <section v-if="!session.preview" class="side-card child-mode-card">
+        <section v-if="authenticated && !session.preview" class="side-card child-mode-card">
           <h2>儿童自主阅读</h2>
           <p>桌面家长端只负责授权绘本范围、阅读时长和会话交接，不渲染儿童端界面。</p>
           <button
             class="secondary"
             type="button"
-            :disabled="session.status !== 'CREATED' || turnBusy"
+            :disabled="session.status !== 'CREATED' || session.mode !== 'PARENT_CHILD' || turnBusy"
             @click="openChildMode"
           >
-            {{ session.status === 'CREATED' ? '设置并进入儿童模式' : '本次阅读已开始，不能切换模式' }}
+            {{ session.mode === 'CHILD_SOLO' ? '此会话已开启儿童模式' : session.status === 'CREATED' ? '设置并进入儿童模式' : '本次阅读已开始，不能切换模式' }}
           </button>
         </section>
         <section v-if="report" class="side-card">

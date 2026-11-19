@@ -4,16 +4,18 @@ import { ApiError } from './api/client'
 import { login, parentUnlock } from './api/auth'
 import { deleteProfile, listProfiles } from './api/profiles'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
-import { addReadingEvent, createReadingSession, getReadingSession, listReadingSessions } from './api/reading'
+import { addReadingEvent, createReadingSession, deleteReadingSession, getReadingSession, listReadingSessions } from './api/reading'
 
 vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), parentUnlock: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []), deleteProfile: vi.fn() }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
-vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), listReadingSessions: vi.fn() }))
+vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), deleteReadingSession: vi.fn(), listReadingSessions: vi.fn() }))
 
 const book = { storyVersionId: 88, title: '书架上的绘本', status: 'PUBLISHED', pages: [{ pageNumber: 1, text: '只在授权时可读的正文' }] }
 const firstPage = Array.from({ length: 30 }, (_, i) => ({ ...book, storyVersionId: i + 1, title: '绘本' + (i + 1) }))
 const missing = () => new ApiError('资源不可用', { status: 404, code: 'RESOURCE_NOT_FOUND' })
+const uncertainDelete = () => new ApiError('连接中断', { code: 'REQUEST_OUTCOME_UNKNOWN' })
+const historyRow = (readingSessionId, visitedPageNumbers) => ({ readingSessionId, storyVersionId: 88, status: 'FINISHED', visitedPageNumbers, revision: 2 })
 let wrapper
 
 async function open(path) {
@@ -406,6 +408,19 @@ it('keeps a fresh anonymous visit on login and offers unlock if the server ident
   expect(parentUnlock).not.toHaveBeenCalled()
 })
 
+it('keeps the login form and its error visible when credentials are rejected', async () => {
+  listProfiles.mockRejectedValueOnce(new ApiError('请先登录', { status: 401, code: 'AUTH_REQUIRED' }))
+  login.mockRejectedValueOnce(new ApiError('账号或密码错误', { status: 401, code: 'INVALID_CREDENTIALS' }))
+  await open('auth')
+  const form = wrapper.get('.auth-card')
+  await form.get('input[autocomplete="username"]').setValue('parent-test')
+  await form.get('input[type="password"]').setValue('wrong-password')
+  await form.trigger('submit')
+  await flushPromises()
+  expect(wrapper.get('.auth-card .form-error').text()).toBe('账号或密码错误')
+  expect(wrapper.get('.auth-card input[autocomplete="username"]').element.value).toBe('parent-test')
+})
+
 it('restricts an open guardian tab when another tab enters child mode', async () => {
   await open('account/children')
   localStorage.setItem('zhiya.childHandoffSessionId', '55')
@@ -441,5 +456,107 @@ it('closes a completed deletion before the reads finish and retries only failed 
   expect(wrapper.find('.account-data-error').exists()).toBe(false)
   expect(listReadingSessions).toHaveBeenCalledTimes(2)
   expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(deleteProfile).toHaveBeenCalledOnce()
+})
+
+it('replaces an open guardian dialog and its history when a different parent signs in in another tab', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  listProfiles.mockResolvedValueOnce([{ childProfileId: 7, nickname: '小芽' }])
+  listReadingSessions.mockResolvedValueOnce([historyRow(11, [1])])
+  await open('account/growth')
+  await wrapper.get('.recent-item button.danger').trigger('click')
+  expect(wrapper.get('[role="dialog"]').text()).toContain('阅读记录 #11')
+
+  let finishProfiles
+  listProfiles.mockReturnValueOnce(new Promise(resolve => { finishProfiles = resolve }))
+  localStorage.setItem('zhiya.account', 'parent-b')
+  window.dispatchEvent(new StorageEvent('storage', { key: 'zhiya.account', storageArea: localStorage }))
+  await flushPromises()
+  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  expect(wrapper.find('.recent-item').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('小芽')
+  listStorybooks.mockResolvedValueOnce([{ ...book, storyVersionId: 99, title: '小禾的绘本' }])
+  listReadingSessions.mockResolvedValueOnce([{ ...historyRow(22, [1, 2]), storyVersionId: 99 }])
+  finishProfiles([{ childProfileId: 8, nickname: '小禾' }])
+  await flushPromises()
+  expect(wrapper.get('.account-person').text()).toContain('parent-b')
+  expect(wrapper.get('.recent-item').text()).toContain('小禾的绘本')
+  expect(wrapper.get('.recent-item').text()).toContain('阅读记录 #22')
+  expect(wrapper.text()).not.toContain('阅读记录 #11')
+  expect(deleteReadingSession).not.toHaveBeenCalled()
+})
+
+const deletionCases = [
+  { kind: 'profile', section: 'children', row: '.child-card', items: [{ childProfileId: 7 }, { childProfileId: 8 }], read: listProfiles, remove: deleteProfile },
+  { kind: 'session', section: 'growth', row: '.recent-item', items: [historyRow(11, [1]), historyRow(12, [1, 2])], read: listReadingSessions, remove: deleteReadingSession },
+]
+
+it.each(deletionCases)('reconciles a lost reply or a 404 for a $kind deletion', async ({ section, row, items, read, remove }) => {
+  read.mockResolvedValueOnce(items).mockResolvedValueOnce(items.slice(1)).mockResolvedValueOnce([])
+  remove.mockRejectedValueOnce(uncertainDelete()).mockRejectedValueOnce(missing())
+  await open('account/' + section)
+  for (let i = 0; i < items.length; i++) {
+    await wrapper.get(row + ' button.danger').trigger('click')
+    await wrapper.get('[role="dialog"] button.danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.findAll(row)).toHaveLength(items.length - i - 1)
+    expect(remove).toHaveBeenCalledTimes(i + 1)
+    expect(read).toHaveBeenCalledTimes(i + 2)
+  }
+})
+
+it.each(deletionCases)('only queries after an uncertain $kind deletion until its presence is confirmed', async ({ section, row, items, read, remove }) => {
+  read.mockResolvedValue(items)
+  await open('account/' + section)
+  remove.mockRejectedValueOnce(uncertainDelete())
+  read.mockRejectedValueOnce(new ApiError('暂不可用', { status: 503 }))
+  await wrapper.get(row + ' button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[role="dialog"] button.primary').text()).toBe('重新核对删除结果')
+  await wrapper.get('[role="dialog"] .modal-close').trigger('click')
+  await wrapper.get(row + ' button.danger').trigger('click')
+  expect(wrapper.find('[role="dialog"] button.danger').exists()).toBe(false)
+  await wrapper.get('[role="dialog"] button.primary').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[role="dialog"]').text()).toContain('目标仍在列表中')
+  expect(remove).toHaveBeenCalledOnce()
+  read.mockResolvedValue(items.slice(1))
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  expect(remove).toHaveBeenCalledTimes(2)
+  expect(wrapper.findAll(row)).toHaveLength(1)
+})
+
+it.each(['overview', 'growth'])('shows unknown totals on %s after a profile deletion until history is available', async (section) => {
+  const survivors = [historyRow(12, [1, 2])]
+  listProfiles.mockResolvedValueOnce([{ childProfileId: 7 }, { childProfileId: 8 }]).mockResolvedValue([{ childProfileId: 8 }])
+  listReadingSessions.mockResolvedValueOnce([historyRow(11, [1]), ...survivors])
+  await open('account/' + section)
+  const values = () => wrapper.findAll('.stat-card strong').slice(0, 3).map(el => el.text())
+  const route = async (part) => {
+    window.history.replaceState({}, '', '/#account/' + part)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flushPromises()
+  }
+  expect(values()).toEqual(['2', '1', '3'])
+  await route('children')
+  listReadingSessions.mockRejectedValue(new ApiError('暂不可用', { status: 503 }))
+  await wrapper.get('.child-card button.danger').trigger('click')
+  await wrapper.get('[role="dialog"] button.danger').trigger('click')
+  await flushPromises()
+  await route(section)
+  expect(values()).toEqual(['待更新', '待更新', '待更新'])
+  let finishHistory
+  listReadingSessions.mockReturnValueOnce(new Promise(resolve => { finishHistory = resolve }))
+  await wrapper.get('.account-data-error button').trigger('click')
+  expect(values()).toEqual(['读取中', '读取中', '读取中'])
+  finishHistory(survivors)
+  await flushPromises()
+  expect(values()).toEqual(['1', '1', '2'])
+  listReadingSessions.mockResolvedValueOnce([])
+  await route(section)
+  expect(values()).toEqual(['0', '0', '0'])
   expect(deleteProfile).toHaveBeenCalledOnce()
 })

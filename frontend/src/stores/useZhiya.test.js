@@ -10,7 +10,7 @@ vi.mock('../api/profiles', () => ({ listProfiles: vi.fn(), createProfile: vi.fn(
 vi.mock('../api/storybooks', () => ({ listStorybooks: vi.fn(), getStoryVersion: vi.fn() }))
 vi.mock('../api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn(), addReadingEvent: vi.fn(), completeReadingSession: vi.fn(), listReadingSessions: vi.fn(), deleteReadingSession: vi.fn(), updateReadingMode: vi.fn() }))
 
-const session = (overrides = {}) => ({ readingSessionId: 55, storyVersionId: 88, currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS', ...overrides })
+const session = (overrides = {}) => ({ readingSessionId: 55, storyVersionId: 88, mode: 'PARENT_CHILD', currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS', ...overrides })
 const detail = (overrides = {}) => ({ session: session(overrides), events: [], report: null })
 const version = { storyVersionId: 88, title: '测试绘本', status: 'APPROVED_PRIVATE', pages: [{ pageNumber: 1, text: '一', defaultNextPageNumber: 3 }, { pageNumber: 3, text: '三', defaultNextPageNumber: 7 }, { pageNumber: 7, text: '七', defaultNextPageNumber: null }] }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
@@ -176,6 +176,49 @@ describe('authoritative reading progress', () => {
 })
 
 describe('account isolation and logout', () => {
+  it.each(['account', 'credential'])('invalidates pending guardian reads on a change of %s', async (change) => {
+    await actions.signIn('parent-a', 'password123')
+    await actions.loadSessions()
+    const oldBooks = deferred(), oldHistory = deferred(), oldReader = deferred()
+    books.listStorybooks.mockReturnValueOnce(oldBooks.promise)
+    reading.listReadingSessions.mockReturnValueOnce(oldHistory.promise)
+    reading.getReadingSession.mockReturnValueOnce(oldReader.promise)
+    window.history.replaceState({}, '', '/#reader/55')
+    const staleReads = [actions.loadBooks(), actions.loadSessions(), actions.syncRoute()]
+    if (change === 'account') localStorage.setItem('zhiya.account', 'parent-b')
+    else document.cookie = 'zhiya_csrf=fixture-new-session; path=/'
+    try {
+      window.history.replaceState({}, '', '/#account/growth')
+      await actions.syncRoute()
+      const newProfiles = deferred()
+      profiles.listProfiles.mockReturnValueOnce(newProfiles.promise)
+      const refreshing = actions.refreshIdentity()
+      expect(state.auth.authenticated).toBe(false)
+      expect(state.profiles).toEqual([])
+      expect(state.sessions).toEqual([])
+      expect(state.currentBook).toBeNull()
+      expect(state.currentReport).toBeNull()
+      expect(state.booksSource).toBe('preview')
+      const newBook = { ...version, storyVersionId: 99, title: '新书' }
+      books.listStorybooks.mockResolvedValueOnce([newBook])
+      reading.listReadingSessions.mockResolvedValueOnce([session({ readingSessionId: 66, storyVersionId: 99 })])
+      newProfiles.resolve([{ childProfileId: 2, nickname: '小禾' }])
+      await refreshing
+      oldBooks.resolve([version])
+      oldHistory.resolve([session()])
+      oldReader.resolve({ ...detail(), report: { title: '先前的小结' } })
+      await Promise.all(staleReads)
+      expect(state.auth.authenticated).toBe(true)
+      expect(state.profiles.map(p => p.childProfileId)).toEqual([2])
+      expect(state.books.map(b => b.storyVersionId)).toEqual([99])
+      expect(state.sessions.map(s => s.readingSessionId)).toEqual([66])
+      expect(state.currentSession).toBeNull()
+      expect(state.currentReport).toBeNull()
+    } finally {
+      document.cookie = 'zhiya_csrf=; Max-Age=0; path=/'
+    }
+  })
+
   it('keeps a late success from restoring details after the latest request received a 404', async () => {
     window.history.replaceState({}, '', '/#detail/88')
     const first = deferred()
@@ -286,6 +329,20 @@ describe('account isolation and logout', () => {
     expect(state.sessions).toEqual([])
   })
 
+  it('keeps an uncertain deletion pending until every history page can be checked', async () => {
+    await actions.signIn('parent-a', 'password123')
+    reading.deleteReadingSession.mockRejectedValueOnce(new ApiError('连接中断', { code: 'REQUEST_OUTCOME_UNKNOWN' }))
+    const firstPage = Array.from({ length: 50 }, (_, i) => session({ readingSessionId: 200 - i }))
+    reading.listReadingSessions.mockResolvedValueOnce(firstPage).mockRejectedValueOnce(new ApiError('暂不可用', { status: 503 }))
+    expect(await actions.removeReadingSession(55)).toBe('unconfirmed')
+    expect(await actions.checkDeletion('session', 55)).toBe('unconfirmed')
+    expect(await actions.removeReadingSession(55)).toBe('unconfirmed')
+    reading.listReadingSessions.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([session()])
+    expect(await actions.checkDeletion('session', 55)).toBe('present')
+    expect(reading.deleteReadingSession).toHaveBeenCalledOnce()
+    expect(reading.listReadingSessions.mock.calls).toEqual([[1, 50], [2, 50], [1, 50], [2, 50]])
+  })
+
   it('ignores a pre-deletion history read arriving after the fresh list', async () => {
     await actions.signIn('parent-a', 'password123')
     const deleted = session({ readingSessionId: 11, storyVersionId: 1, visitedPageNumbers: [1, 2] })
@@ -320,14 +377,53 @@ describe('account isolation and logout', () => {
 })
 
 describe('child-mode handoff', () => {
-  it('enters child mode only from CREATED and restores the parent after password unlock', async () => {
+  async function openNewParentSession() {
+    await actions.bootstrap()
+    books.listStorybooks.mockClear()
     reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
     await actions.loadReaderRoute()
+  }
+
+  function confirmChildCredential() {
+    profiles.listProfiles.mockRejectedValueOnce(new ApiError('仅限家长', { status: 403, code: 'FORBIDDEN' }))
+  }
+
+  it('keeps a guardian on the reader if another device already issued the grant', async () => {
+    await openNewParentSession()
+    expect(await actions.enterChildMode(55, [88], 300)).toBe(true)
+    expect(reading.updateReadingMode).toHaveBeenCalledOnce()
+    expect(state.auth.status).toBe('authenticated')
+    expect(state.currentSession.mode).toBe('CHILD_SOLO')
+    expect(state.currentSession.expiresAt).toBe('2026-11-18T08:00:00Z')
+    expect(state.childMode).toBeNull()
+    expect(localStorage.getItem('zhiya.childHandoffSessionId')).toBeNull()
+    expect(sessionStorage.getItem('zhiya.childHandoffSessionId')).toBeNull()
+    expect(location.hash).toBe('#reader/55')
+    expect(await actions.enterChildMode(55, [88], 300)).toBe(false)
+    expect(reading.updateReadingMode).toHaveBeenCalledOnce()
+  })
+
+  it('restricts the device while its credential cannot be confirmed after a successful mode change', async () => {
+    await openNewParentSession()
+    profiles.listProfiles.mockRejectedValueOnce(new ApiError('暂不可用', { status: 503 }))
+    expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
+    expect(state.auth.authenticated).toBe(false)
+    expect(state.profiles).toEqual([])
+    expect(location.hash).toBe('#child/55')
+    await actions.refreshIdentity()
+    expect(state.auth.status).toBe('authenticated')
+    expect(location.hash).toBe('#account/overview')
+    expect(reading.updateReadingMode).toHaveBeenCalledOnce()
+  })
+
+  it('enters child mode only from CREATED and restores the parent after password unlock', async () => {
+    await openNewParentSession()
     expect(await actions.startCurrentReading()).toBe(true)
     expect(await actions.enterChildMode(55, [88], 600)).toBe(false)
 
     reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
     await actions.loadReaderRoute()
+    confirmChildCredential()
     expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
     expect(reading.updateReadingMode).toHaveBeenCalledWith(55, {
       mode: 'CHILD_SOLO',
@@ -346,8 +442,8 @@ describe('child-mode handoff', () => {
   })
 
   it('keeps the child credential on the handoff when browser navigation changes the hash', async () => {
-    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
-    await actions.loadReaderRoute()
+    await openNewParentSession()
+    confirmChildCredential()
     expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
     window.history.replaceState({}, '', '/#library')
     await actions.syncRoute()
@@ -369,8 +465,8 @@ describe('child-mode handoff', () => {
   })
 
   it('leaves the handoff as soon as unlock succeeds, even if profile refresh fails', async () => {
-    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
-    await actions.loadReaderRoute()
+    await openNewParentSession()
+    confirmChildCredential()
     expect(await actions.enterChildMode(55, [88], 600)).toBe(true)
     const profileRefresh = deferred()
     profiles.listProfiles.mockReturnValueOnce(profileRefresh.promise)
@@ -412,8 +508,8 @@ describe('child-mode handoff', () => {
   })
 
   it('does not claim an exact authorization count that cannot be restored', async () => {
-    reading.getReadingSession.mockResolvedValueOnce(detail({ status: 'CREATED', revision: 0, visitedPageNumbers: [] }))
-    await actions.loadReaderRoute()
+    await openNewParentSession()
+    confirmChildCredential()
     reading.updateReadingMode.mockResolvedValueOnce({
       mode: 'CHILD_SOLO',
       childGrantId: 4,

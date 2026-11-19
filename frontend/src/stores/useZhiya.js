@@ -1,5 +1,5 @@
 import { computed, reactive, readonly } from 'vue'
-import { ApiError, createClientEventId, describeApiError } from '../api/client'
+import { ApiError, createClientEventId, describeApiError, readCsrfCookie } from '../api/client'
 import { checkHealth, login, logout, parentUnlock, register } from '../api/auth'
 import { createProfile, deleteProfile, listProfiles, updateProfile } from '../api/profiles'
 import { getStoryVersion, listStorybooks } from '../api/storybooks'
@@ -38,6 +38,7 @@ const savedNickname = localStorage.getItem('zhiya.guardianNickname') || '知芽�
 const state = reactive({
   route: parseRoute(),
   health: 'checking',
+  accountViewKey: 0,
   auth: {
     status: 'checking',
     authenticated: false,
@@ -66,9 +67,11 @@ const state = reactive({
   sessionBusy: false,
   profileDeleteBusyId: null,
   sessionDeleteBusyId: null,
+  pendingDeletionChecks: { profile: new Set(), session: new Set() },
   childMode: null,
   readingSyncRequired: false,
   sessions: [],
+  sessionsLoaded: false,
   sessionsLoading: false,
   sessionsError: '',
   toast: { message: '', tone: 'info', visible: false },
@@ -76,6 +79,8 @@ const state = reactive({
 
 let toastTimer = null
 let authEpoch = 0
+// This cookie rotates with the HttpOnly session. Keep the comparison in this tab's memory.
+let knownCsrf = readCsrfCookie()
 let profilesRequest = 0
 let booksRequest = 0
 let detailRequest = 0
@@ -84,12 +89,16 @@ let readingEpoch = 0
 let pendingReading = null
 
 function clearAccountViews() {
+  clearTimeout(toastTimer)
+  state.toast = { message: '', tone: 'info', visible: false }
   state.profiles = []
   state.profilesLoading = false
   state.profilesError = ''
   state.activeProfileId = null
   state.sessions = []
+  state.sessionsLoaded = false
   state.sessionsError = ''
+  for (const ids of Object.values(state.pendingDeletionChecks)) ids.clear()
   state.currentBook = null
   state.currentSession = null
   state.currentEvents = []
@@ -112,6 +121,7 @@ function clearAccountViews() {
 
 function resetAuthentication() {
   authEpoch += 1
+  knownCsrf = readCsrfCookie()
   clearAccountViews()
   rememberChildSession(null)
   for (const key of ['account', 'activeProfileId', 'selectedBookId', 'plan', 'guardianNickname']) {
@@ -291,8 +301,30 @@ async function bootstrap() {
   if (epoch === authEpoch) await refreshIdentity()
 }
 
+function invalidateChangedIdentity() {
+  const csrf = readCsrfCookie()
+  const accountChanged = state.auth.authenticated && state.auth.account !== (localStorage.getItem('zhiya.account') || '')
+  if (csrf === knownCsrf && !accountChanged) return
+  knownCsrf = csrf
+  authEpoch += 1
+  state.accountViewKey += 1
+  clearAccountViews()
+  state.activeProfileId = savedProfileId()
+  state.auth = {
+    status: 'checking', authenticated: false, role: null, accountId: null,
+    account: '', nickname: localStorage.getItem('zhiya.guardianNickname') || '知芽家长',
+  }
+}
+
+function syncStoredIdentity(event) {
+  if (event.storageArea === localStorage && [null, 'zhiya.account', CHILD_SESSION_KEY].includes(event.key)) {
+    return refreshIdentity()
+  }
+}
+
 async function refreshIdentity() {
   if (state.auth.status === 'signing-out') return
+  invalidateChangedIdentity()
   const epoch = authEpoch
   const previous = state.auth.status
   if (previous === 'child' || previous === 'handoff') state.activeProfileId = savedProfileId()
@@ -356,6 +388,7 @@ async function signIn(account, password) {
     throw error
   }
   if (epoch !== authEpoch) return
+  knownCsrf = readCsrfCookie()
   state.auth.accountId = result.data.accountId
   state.auth.account = account
   state.auth.authenticated = true
@@ -363,6 +396,7 @@ async function signIn(account, password) {
   state.auth.role = 'GUARDIAN'
   localStorage.setItem('zhiya.account', account)
   await loadProfiles()
+  if (epoch !== authEpoch) return
   await loadBooks()
   if (epoch !== authEpoch) return
   setToast('已登录知芽家长空间')
@@ -427,33 +461,79 @@ async function editProfile(profileId, payload) {
   return profile
 }
 
+function applyProfileRemoval(profileId) {
+  state.profiles = state.profiles.filter((profile) => profile.childProfileId !== profileId)
+  state.sessions = []
+  state.sessionsLoaded = false
+  if (!activeProfile()) {
+    state.activeProfileId = 0
+    readingEpoch += 1
+    state.sessionLoading = state.sessionBusy = false
+    state.currentSession = null
+    state.currentBook = null
+    state.currentEvents = []
+    state.currentReport = null
+    if (state.profiles.length) localStorage.setItem('zhiya.activeProfileId', '0')
+    else localStorage.removeItem('zhiya.activeProfileId')
+  }
+  void loadSessions()
+}
+
+function applySessionRemoval(sessionId) {
+  const wasLoading = state.sessionsLoading
+  sessionsRequest += 1
+  state.sessions = state.sessions.filter((session) => session.readingSessionId !== sessionId)
+  if (state.currentSession?.readingSessionId === sessionId) {
+    readingEpoch += 1
+    state.sessionLoading = state.sessionBusy = false
+    state.currentSession = null
+    state.currentBook = null
+    state.currentEvents = []
+    state.currentReport = null
+  }
+  if (wasLoading) void loadSessions()
+}
+
+async function checkDeletion(type, id) {
+  const epoch = authEpoch
+  let present
+  if (type === 'profile') {
+    const items = await loadProfiles()
+    if (!items || epoch !== authEpoch) return 'unconfirmed'
+    present = items.some(profile => profile.childProfileId === id)
+    if (!present) applyProfileRemoval(id)
+  } else {
+    if (!await loadSessions() || epoch !== authEpoch) return 'unconfirmed'
+    present = state.sessions.some(session => session.readingSessionId === id)
+    if (!present) applySessionRemoval(id)
+  }
+  state.pendingDeletionChecks[type].delete(id)
+  if (present) return 'present'
+  setToast(type === 'profile' ? '已确认儿童档案不在当前列表中' : '已确认阅读记录不在当前列表中')
+  return 'absent'
+}
+
+function handleDeleteError(error, type, id, epoch) {
+  if (epoch !== authEpoch) return false
+  if (error.code !== 'REQUEST_OUTCOME_UNKNOWN' && error.status !== 404) throw error
+  state.pendingDeletionChecks[type].add(id)
+  return 'unconfirmed'
+}
+
 async function removeProfile(profileId) {
   if (state.profileDeleteBusyId !== null) return false
+  if (state.pendingDeletionChecks.profile.has(profileId)) return 'unconfirmed'
   const epoch = authEpoch
   state.profileDeleteBusyId = profileId
   try {
     await deleteProfile(profileId)
     if (epoch !== authEpoch) return false
-    state.profiles = state.profiles.filter((profile) => profile.childProfileId !== profileId)
-    state.sessions = []
-    if (state.activeProfileId === profileId) {
-      state.activeProfileId = 0
-      readingEpoch += 1
-      state.sessionLoading = state.sessionBusy = false
-      state.currentSession = null
-      state.currentBook = null
-      state.currentEvents = []
-      state.currentReport = null
-      if (state.profiles.length) localStorage.setItem('zhiya.activeProfileId', '0')
-      else localStorage.removeItem('zhiya.activeProfileId')
-    }
+    applyProfileRemoval(profileId)
+    void reloadProfiles()
     setToast('儿童档案已删除，关联阅读记录已清理')
-    // The DELETE has committed. Each read exposes its own loading and retry state.
-    void Promise.allSettled([loadProfiles(), loadSessions()])
     return true
   } catch (error) {
-    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
-    return false
+    return handleDeleteError(error, 'profile', profileId, epoch)
   } finally {
     if (epoch === authEpoch) state.profileDeleteBusyId = null
   }
@@ -461,26 +541,17 @@ async function removeProfile(profileId) {
 
 async function removeReadingSession(sessionId) {
   if (state.sessionDeleteBusyId !== null) return false
+  if (state.pendingDeletionChecks.session.has(sessionId)) return 'unconfirmed'
   const epoch = authEpoch
   state.sessionDeleteBusyId = sessionId
   try {
     await deleteReadingSession(sessionId)
     if (epoch !== authEpoch) return false
-    const wasLoading = state.sessionsLoading
-    sessionsRequest += 1
-    state.sessions = state.sessions.filter((session) => session.readingSessionId !== sessionId)
-    if (state.currentSession?.readingSessionId === sessionId) {
-      state.currentSession = null
-      state.currentBook = null
-      state.currentEvents = []
-      state.currentReport = null
-    }
+    applySessionRemoval(sessionId)
     setToast('阅读记录已删除')
-    if (wasLoading) void loadSessions()
     return true
   } catch (error) {
-    if (epoch === authEpoch) setToast(describeApiError(error), 'error')
-    return false
+    return handleDeleteError(error, 'session', sessionId, epoch)
   } finally {
     if (epoch === authEpoch) state.sessionDeleteBusyId = null
   }
@@ -650,7 +721,8 @@ async function startCurrentReading() {
 
 async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSeconds) {
   const session = state.currentSession
-  if (!session || session.preview || session.readingSessionId !== sessionId || session.status !== 'CREATED' || state.sessionBusy) {
+  if (!session || session.preview || session.readingSessionId !== sessionId || session.status !== 'CREATED'
+      || session.mode !== 'PARENT_CHILD' || !state.auth.authenticated || state.sessionBusy) {
     return false
   }
   const epoch = authEpoch
@@ -662,6 +734,29 @@ async function enterChildMode(sessionId, allowedStoryVersionIds, timeLimitSecond
       timeLimitSeconds,
     })
     if (epoch !== authEpoch) return false
+    knownCsrf = readCsrfCookie()
+    // The same 200 also acknowledges a duration change from a second guardian device.
+    // Only install the handoff after the guardian-only endpoint confirms a child credential.
+    try {
+      await listProfiles()
+      if (epoch !== authEpoch) return false
+      if (state.currentSession?.readingSessionId === sessionId) {
+        Object.assign(state.currentSession, { mode: result.mode, expiresAt: result.expiresAt })
+      }
+      setToast('儿童授权已更新，本机仍在家长空间。')
+      return true
+    } catch (error) {
+      if (epoch !== authEpoch) return false
+      if (error.status !== 403 || error.code !== 'FORBIDDEN') {
+        // The write succeeded. Until identity can be checked, offer password unlock only.
+        rememberChildSession(sessionId)
+        authEpoch += 1
+        clearAccountViews()
+        state.auth = { ...state.auth, status: 'handoff', authenticated: false, role: null, accountId: null }
+        replaceRoute(`child/${sessionId}`)
+        return true
+      }
+    }
     authEpoch += 1
     const book = state.currentBook
     clearAccountViews()
@@ -732,6 +827,7 @@ async function unlockChildMode(account, password) {
     const result = await parentUnlock(account, password)
     if (epoch !== authEpoch) return false
     epoch = ++authEpoch
+    knownCsrf = readCsrfCookie()
     rememberChildSession(null)
     clearAccountViews()
     state.activeProfileId = savedProfileId()
@@ -935,6 +1031,7 @@ async function loadSessions() {
   state.sessionsError = ''
   if (!state.auth.authenticated) {
     state.sessions = []
+    state.sessionsLoaded = false
     state.sessionsLoading = false
     return false
   }
@@ -949,6 +1046,7 @@ async function loadSessions() {
       if (items.length < pageSize) break
     }
     state.sessions = [...sessions.values()]
+    state.sessionsLoaded = true
     return true
   } catch (error) {
     if (isCurrent()) state.sessionsError = describeApiError(error)
@@ -1007,6 +1105,7 @@ export const zhiya = readonly(state)
 export const zhiyaActions = {
   bootstrap,
   refreshIdentity,
+  syncStoredIdentity,
   navigate,
   syncRoute,
   signIn,
@@ -1019,6 +1118,7 @@ export const zhiyaActions = {
   addProfile,
   editProfile,
   removeProfile,
+  checkDeletion,
   loadProfiles,
   loadBooks,
   loadMoreBooks,

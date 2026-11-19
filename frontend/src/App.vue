@@ -43,12 +43,14 @@ function onHashChange() {
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('focus', zhiyaActions.refreshIdentity)
+  window.addEventListener('storage', zhiyaActions.syncStoredIdentity)
   zhiyaActions.bootstrap()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('focus', zhiyaActions.refreshIdentity)
+  window.removeEventListener('storage', zhiyaActions.syncStoredIdentity)
 })
 </script>
 
@@ -62,7 +64,7 @@ onBeforeUnmount(() => {
     :loading="state.sessionLoading"
     :unlock-action="zhiyaActions.unlockChildMode"
   />
-  <div v-else class="app">
+  <div v-else :key="state.accountViewKey" class="app">
     <AppHeader
       :route="state.route"
       :auth="state.auth"
@@ -140,12 +142,15 @@ onBeforeUnmount(() => {
       :sessions-error="state.sessionsError"
       :books="state.books"
       :totals="totals"
+      :totals-loaded="state.sessionsLoaded"
       :loading="state.sessionsLoading"
       @navigate="zhiyaActions.navigate"
       @select-profile="zhiyaActions.selectProfile"
       :save-profile-action="handleProfileSave"
       :delete-profile-action="zhiyaActions.removeProfile"
       :delete-session-action="zhiyaActions.removeReadingSession"
+      :check-deletion-action="zhiyaActions.checkDeletion"
+      :pending-deletion-checks="state.pendingDeletionChecks"
       :reload-account-data-action="zhiyaActions.reloadProfiles"
       @reload-sessions="zhiyaActions.loadSessions"
       @sign-out="zhiyaActions.signOut"

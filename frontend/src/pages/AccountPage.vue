@@ -14,10 +14,13 @@ const props = defineProps({
   sessionsError: { type: String, default: '' },
   books: { type: Array, default: () => [] },
   totals: { type: Object, required: true },
+  totalsLoaded: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   saveProfileAction: { type: Function, required: true },
   deleteProfileAction: { type: Function, default: async () => false },
   deleteSessionAction: { type: Function, default: async () => false },
+  checkDeletionAction: { type: Function, default: async () => 'unconfirmed' },
+  pendingDeletionChecks: { type: Object, default: () => ({}) },
   reloadAccountDataAction: { type: Function, default: async () => false },
 })
 
@@ -50,6 +53,12 @@ const sessionStatusLabels = {
   IN_PROGRESS: '阅读中',
   FINISHED: '已完成',
   INTERRUPTED: '已中断',
+}
+
+function growthValue(metric) {
+  if (props.loading) return '读取中'
+  if (props.sessionsError || !props.totalsLoaded) return '待更新'
+  return props.totals[metric]
 }
 
 function openNew() {
@@ -113,6 +122,7 @@ function askDeleteProfile(profile) {
   deleteTarget.value = {
     type: 'profile',
     id: profile.childProfileId,
+    needsCheck: props.pendingDeletionChecks.profile?.has(profile.childProfileId),
     title: `${profile.nickname || '未命名宝贝'}（档案 #${profile.childProfileId}）`,
   }
 }
@@ -122,19 +132,35 @@ function askDeleteSession(session) {
   deleteTarget.value = {
     type: 'session',
     id: session.readingSessionId,
+    needsCheck: props.pendingDeletionChecks.session?.has(session.readingSessionId),
     title: `${sessionTitle(session)}（${sessionRecordLabel(session)}）`,
   }
 }
 
 async function confirmDelete() {
-  if (!deleteTarget.value || deleteBusy.value) return
+  const target = deleteTarget.value
+  if (!target || deleteBusy.value) return
   deleteBusy.value = true
   deleteError.value = ''
   try {
-    const removed = deleteTarget.value.type === 'profile'
-      ? await props.deleteProfileAction(deleteTarget.value.id)
-      : await props.deleteSessionAction(deleteTarget.value.id)
-    if (removed) deleteTarget.value = null
+    if (!target.needsCheck) {
+      const remove = target.type === 'profile' ? props.deleteProfileAction : props.deleteSessionAction
+      const result = await remove(target.id)
+      if (result !== 'unconfirmed') {
+        if (result) deleteTarget.value = null
+        return
+      }
+      target.needsCheck = true
+    }
+    const result = await props.checkDeletionAction(target.type, target.id)
+    if (result === 'absent') {
+      deleteTarget.value = null
+    } else if (result === 'present') {
+      target.needsCheck = false
+      deleteError.value = '已核对，目标仍在列表中。如需删除，请再次确认。'
+    } else {
+      deleteError.value = '删除结果尚未确认，请重新核对。'
+    }
   } catch (error) {
     deleteError.value = describeApiError(error)
   } finally {
@@ -218,9 +244,9 @@ async function confirmDelete() {
         <template v-else-if="section === 'growth'">
           <div class="account-title"><div><h1>成长足迹</h1><p>只展示后端真实阅读会话，不推断情绪或能力。</p></div></div>
           <div class="stats-grid">
-            <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ totals.sessions }}</strong></div>
-            <div class="stat-card"><span>读过绘本版本</span><strong>{{ totals.read }}</strong></div>
-            <div class="stat-card"><span>累计浏览页面</span><strong>{{ totals.pages }}</strong></div>
+            <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ growthValue('sessions') }}</strong></div>
+            <div class="stat-card"><span>读过绘本版本</span><strong>{{ growthValue('read') }}</strong></div>
+            <div class="stat-card"><span>累计浏览页面</span><strong>{{ growthValue('pages') }}</strong></div>
           </div>
           <div v-if="loading" class="reader-loading"><div class="spinner" /></div>
           <div v-else-if="sessions.length" class="recent-list">
@@ -232,7 +258,7 @@ async function confirmDelete() {
               </div>
             </article>
           </div>
-          <div v-else-if="!sessionsError" class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
+          <div v-else-if="totalsLoaded && !sessionsError" class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
         </template>
 
         <template v-else-if="section === 'shelf'">
@@ -280,9 +306,9 @@ async function confirmDelete() {
             <div class="hero-illustration"><img src="/assets/reader-scene.svg" alt=""></div>
           </section>
           <div class="stats-grid">
-            <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ totals.sessions }}</strong></div>
-            <div class="stat-card"><span>访问绘本</span><strong>{{ totals.read }}</strong></div>
-            <div class="stat-card"><span>浏览页面</span><strong>{{ totals.pages }}</strong></div>
+            <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ growthValue('sessions') }}</strong></div>
+            <div class="stat-card"><span>访问绘本</span><strong>{{ growthValue('read') }}</strong></div>
+            <div class="stat-card"><span>浏览页面</span><strong>{{ growthValue('pages') }}</strong></div>
             <div class="stat-card"><span>当前档案</span><strong>{{ activeProfile ? '已选择' : (profiles.length ? '待选择' : '待添加') }}</strong></div>
           </div>
           <section class="account-card">
@@ -290,7 +316,7 @@ async function confirmDelete() {
             <div v-if="recentSessions.length" class="recent-list">
               <article v-for="session in recentSessions" :key="session.readingSessionId" class="recent-item"><strong>{{ sessionTitle(session) }}</strong><span>第 {{ session.currentPage }} 页 · {{ sessionStatusLabels[session.status] || '状态待确认' }}</span></article>
             </div>
-            <p v-else-if="!loading && !sessionsError" class="address">还没有真实阅读会话，从绘本馆开始一次亲子共读吧。</p>
+            <p v-else-if="totalsLoaded && !loading && !sessionsError" class="address">还没有真实阅读会话，从绘本馆开始一次亲子共读吧。</p>
           </section>
         </template>
       </section>
@@ -300,15 +326,16 @@ async function confirmDelete() {
       <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="delete-account-item-title">
         <div class="modal-head">
           <div>
-            <h2 id="delete-account-item-title">确认删除{{ deleteTarget.type === 'profile' ? '儿童档案' : '阅读记录' }}？</h2>
+            <h2 id="delete-account-item-title">{{ deleteTarget.needsCheck ? '核对删除结果' : (deleteTarget.type === 'profile' ? '确认删除儿童档案？' : '确认删除阅读记录？') }}</h2>
             <p>{{ deleteTarget.title }}{{ deleteTarget.type === 'profile' ? '关联的阅读会话、语音媒体和儿童授权也会一起删除。' : '删除后无法恢复。' }}</p>
           </div>
           <button class="modal-close" type="button" aria-label="关闭" :disabled="deleteBusy" @click="deleteTarget = null">×</button>
         </div>
         <p v-if="deleteError" class="form-error" role="alert">{{ deleteError }}</p>
         <div class="modal-actions">
-          <button class="secondary" type="button" :disabled="deleteBusy" @click="deleteTarget = null">保留</button>
-          <button class="danger" type="button" :disabled="deleteBusy" @click="confirmDelete">{{ deleteBusy ? '正在删除…' : '确认删除' }}</button>
+          <button class="secondary" type="button" :disabled="deleteBusy" @click="deleteTarget = null">{{ deleteTarget.needsCheck ? '关闭' : '保留' }}</button>
+          <button v-if="deleteTarget.needsCheck" class="primary" type="button" :disabled="deleteBusy" @click="confirmDelete">{{ deleteBusy ? '正在核对…' : '重新核对删除结果' }}</button>
+          <button v-else class="danger" type="button" :disabled="deleteBusy" @click="confirmDelete">{{ deleteBusy ? '正在删除…' : '确认删除' }}</button>
         </div>
       </section>
     </div>

@@ -7,7 +7,7 @@ import { synthesize, transcribe } from '../api/voice'
 vi.mock('../api/voice', () => ({ synthesize: vi.fn(), transcribe: vi.fn() }))
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const book = { storyVersionId: 88, title: '绘本', pageCount: 3, pages: [{ pageNumber: 1, text: '一', defaultNextPageNumber: 3 }, { pageNumber: 3, text: '三', defaultNextPageNumber: 7 }, { pageNumber: 7, text: '七', defaultNextPageNumber: null }] }
-const initialSession = { readingSessionId: 55, currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS' }
+const initialSession = { readingSessionId: 55, mode: 'PARENT_CHILD', currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS' }
 let wrapper, track, getUserMedia, recorders, audios, showPage
 const button = (text) => wrapper.findAll('button').find((item) => item.text().includes(text))
 
@@ -242,6 +242,16 @@ describe('parent child-mode handoff', () => {
     render()
     const modeButton = button('本次阅读已开始')
     expect(modeButton.element.disabled).toBe(true)
+  })
+
+  it('keeps an already authorized CREATED session out of first-time handoff', async () => {
+    const enterChildModeAction = vi.fn()
+    render({ session: { ...initialSession, mode: 'CHILD_SOLO', status: 'CREATED' }, enterChildModeAction })
+    const modeButton = button('此会话已开启儿童模式')
+    expect(modeButton.element.disabled).toBe(true)
+    await modeButton.trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(enterChildModeAction).not.toHaveBeenCalled()
   })
 })
 
