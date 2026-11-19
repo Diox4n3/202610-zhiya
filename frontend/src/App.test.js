@@ -289,6 +289,25 @@ it('allows an explicitly labelled local preview to open without fetching API det
   expect(getStoryVersion).not.toHaveBeenCalled()
 })
 
+it('shows that the reader is restoring while guardian identity is checked on refresh', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  let finishIdentityCheck
+  listProfiles.mockReturnValueOnce(new Promise((resolve) => { finishIdentityCheck = resolve }))
+  getReadingSession.mockResolvedValue(handoffSession('PARENT_CHILD'))
+  getStoryVersion.mockResolvedValue(book)
+
+  await open('reader/55')
+  const loading = wrapper.get('.reader-page').text()
+  expect(loading).toContain('正在恢复阅读会话')
+  expect(loading).not.toContain('阅读会话暂时不可用')
+  expect(getReadingSession).not.toHaveBeenCalled()
+
+  finishIdentityCheck([{ childProfileId: 7 }])
+  await flushPromises()
+  expect(wrapper.get('.reader-heading').text()).toContain(book.title)
+  expect(wrapper.text()).not.toContain('正在恢复阅读会话')
+})
+
 it('returns from an unavailable session to the library', async () => {
   getReadingSession.mockRejectedValueOnce(missing())
   await open('reader/999')

@@ -121,7 +121,7 @@ onBeforeUnmount(() => {
       :book="state.currentBook"
       :session="state.currentSession"
       :report="state.currentReport"
-      :loading="state.sessionLoading"
+      :loading="state.sessionLoading || state.auth.status === 'checking'"
       :authenticated="state.auth.authenticated && state.auth.status === 'authenticated'"
       :sync-required="state.readingSyncRequired"
       :record-page="zhiyaActions.recordPageChange"

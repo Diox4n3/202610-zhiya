@@ -394,8 +394,14 @@ async function refreshIdentity() {
       await Promise.all([loadBooks(), handleRoute()])
       return
     }
-    await loadBooks({}, localStorage.getItem(bookSelectionKey('api')))
-    if (epoch !== authEpoch) return
+    const initialRoute = state.route
+    const shelf = loadBooks({}, localStorage.getItem(bookSelectionKey('api')))
+    if (initialRoute.name === 'reader' || initialRoute.name === 'library') {
+      await Promise.all([shelf, handleRoute()])
+      return
+    }
+    await shelf
+    if (epoch !== authEpoch || state.route !== initialRoute) return
   } catch (error) {
     if (epoch !== authEpoch) return
     const remembered = savedChildSessionId()
@@ -1185,7 +1191,9 @@ async function handleRoute() {
 
   const route = state.route
   if (route.name === 'library') {
-    if (state.auth.authenticated && state.booksSource !== 'api' && state.nextBooksPage === null) await loadBooks()
+    if (state.auth.authenticated && !state.booksLoading && state.booksSource !== 'api' && state.nextBooksPage === null) {
+      await loadBooks()
+    }
   } else if (route.name === 'detail' && route.versionId) {
     await loadDetail(route.versionId)
   } else if (route.name === 'reader') {
