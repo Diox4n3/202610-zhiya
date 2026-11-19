@@ -671,6 +671,7 @@ function openDetail(bookOrVersionId) {
 async function loadDetail(versionId) {
   const epoch = authEpoch
   const request = ++detailRequest
+  const shelfRequest = booksRequest
   const route = location.hash
   const isCurrent = () => epoch === authEpoch && request === detailRequest && route === location.hash
   state.detailLoading = true
@@ -691,14 +692,19 @@ async function loadDetail(versionId) {
     if (!isCurrent()) return
     state.currentBook = mapApiBook(version)
   } catch (error) {
-    if (!isCurrent()) return
+    if (epoch !== authEpoch || request !== detailRequest) return
+    // After leaving the detail page, a 404 can still invalidate the same shelf request.
+    if (route !== location.hash && (error.status !== 404 || shelfRequest !== booksRequest)) return
     if (error.status === 404 && state.booksSource === 'api') {
       const remaining = state.books.filter((book) => book.storyVersionId !== Number(versionId))
       const removed = remaining.length < state.books.length
       applyBooks(remaining, 'api')
       if (removed || state.booksLoading) void refreshShelfAfterNotFound()
+    } else if (error.status === 404 && state.booksLoading) {
+      // The first API shelf request predates the 404. Replace it while keeping any saved selection.
+      void fetchBooksPage(1)
     }
-    setToast(describeApiError(error), 'error')
+    if (route === location.hash) setToast(describeApiError(error), 'error')
   } finally {
     if (isCurrent()) state.detailLoading = false
   }
