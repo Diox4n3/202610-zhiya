@@ -85,6 +85,7 @@ let authEpoch = 0
 let knownCsrf = readCsrfCookie()
 let profilesRequest = 0
 let booksRequest = 0
+let firstShelfPage = null
 let pendingBookRestore = null
 let detailRequest = 0
 let sessionsRequest = 0
@@ -109,6 +110,7 @@ function clearAccountViews() {
   state.currentReport = null
   state.bookFilters = { ageBand: '', topic: '' }
   state.selectedBookId = ''
+  firstShelfPage = null
   pendingBookRestore = null
   profilesRequest += 1
   booksRequest += 1
@@ -152,11 +154,7 @@ function setToast(message, tone = 'info') {
 
 function navigate(path) {
   const target = `#${String(path).replace(/^#/, '')}`
-  if (location.hash === target) {
-    state.route = parseRoute()
-  } else {
-    location.hash = target
-  }
+  if (location.hash !== target) location.hash = target
 }
 
 function replaceRoute(path) {
@@ -221,17 +219,20 @@ async function fetchBooksPage(page) {
   const keepSelection = pendingBookRestore !== null || Boolean(state.booksError && state.selectedBookId)
   state.booksLoading = true
   state.booksError = ''
+  let pageRequest
   try {
     if (!state.auth.authenticated) {
       loadPreviewBooks('登录后可读取组内已发布绘本，当前展示本地设计预览。')
       return
     }
-    const items = await listStorybooks({
+    pageRequest = listStorybooks({
       ageBand: state.bookFilters.ageBand || undefined,
       topic: state.bookFilters.topic || undefined,
       page,
       pageSize,
     })
+    if (page === 1) firstShelfPage = pageRequest
+    const items = await pageRequest
     if (epoch !== authEpoch || request !== booksRequest) return
     state.nextBooksPage = items.length === pageSize ? page + 1 : null
     if (page > 1) {
@@ -272,6 +273,7 @@ async function fetchBooksPage(page) {
       loadPreviewBooks(error.message || '绘本列表暂时不可用，已切换到本地预览。')
     }
   } finally {
+    if (firstShelfPage === pageRequest) firstShelfPage = null
     if (request === booksRequest) state.booksLoading = false
   }
 }
@@ -394,14 +396,8 @@ async function refreshIdentity() {
       await Promise.all([loadBooks(), handleRoute()])
       return
     }
-    const initialRoute = state.route
-    const shelf = loadBooks({}, localStorage.getItem(bookSelectionKey('api')))
-    if (initialRoute.name === 'reader' || initialRoute.name === 'library') {
-      await Promise.all([shelf, handleRoute()])
-      return
-    }
-    await shelf
-    if (epoch !== authEpoch || state.route !== initialRoute) return
+    await Promise.all([loadBooks({}, localStorage.getItem(bookSelectionKey('api'))), handleRoute()])
+    return
   } catch (error) {
     if (epoch !== authEpoch) return
     const remembered = savedChildSessionId()
@@ -680,6 +676,12 @@ async function loadDetail(versionId) {
   state.detailLoading = true
   state.currentBook = null
   try {
+    // A numeric detail link can identify either a demo or a server version.
+    // Only overlapping IDs need the first shelf page to decide which source to use.
+    if (firstShelfPage && state.booksSource === 'preview' && previewBooks.some((book) => book.storyVersionId === versionId)) {
+      await firstShelfPage.catch(() => {}) // The shelf handles failures and chooses its fallback.
+      if (!isCurrent()) return
+    }
     const cached = state.books.find((book) => book.storyVersionId === Number(versionId))
     if (cached?.source === 'preview') {
       state.currentBook = cached

@@ -18,6 +18,23 @@ const uncertainDelete = () => new ApiError('连接中断', { code: 'REQUEST_OUTC
 const historyRow = (readingSessionId, visitedPageNumbers) => ({ readingSessionId, storyVersionId: 88, status: 'FINISHED', visitedPageNumbers, revision: 2 })
 let wrapper
 
+function holdBookshelfPage(pageToHold) {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  localStorage.setItem('zhiya.selectedBookId', 'version-63')
+  const catalog = Array.from({ length: 63 }, (_, i) => ({
+    ...book,
+    storyVersionId: i + 1,
+    title: '绘本' + (i + 1),
+  }))
+  let releasePage
+  const pendingPage = new Promise((resolve) => { releasePage = resolve })
+  listStorybooks.mockImplementation(async ({ page, pageSize }) => {
+    if (page === pageToHold) await pendingPage
+    return catalog.slice((page - 1) * pageSize, page * pageSize)
+  })
+  return releasePage
+}
+
 async function open(path) {
   window.history.replaceState({}, '', '/#' + path)
   const { default: App } = await import('./App.vue')
@@ -36,6 +53,79 @@ beforeEach(() => {
   getDeletionStatus.mockResolvedValue(false)
 })
 afterEach(() => wrapper?.unmount())
+
+it('opens cold-start growth history before the saved bookshelf selection is restored', async () => {
+  const releaseFirstPage = holdBookshelfPage(1)
+  listReadingSessions.mockResolvedValue([historyRow(11, [1])])
+  await open('account/growth')
+
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1])
+  const growthNav = wrapper.get('.top-nav [aria-current="page"]')
+  expect(growthNav.text()).toBe('成长记录')
+  await growthNav.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.recent-item').text()).toContain('阅读记录 #11')
+  expect(listReadingSessions).toHaveBeenCalledTimes(1)
+
+  releaseFirstPage()
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 3])
+  expect(listReadingSessions).toHaveBeenCalledTimes(1)
+})
+
+it('opens cold-start book details after identity verification while the bookshelf restores', async () => {
+  const releaseSecondPage = holdBookshelfPage(2)
+  let verifyIdentity
+  listProfiles.mockReturnValue(new Promise((resolve) => { verifyIdentity = resolve }))
+  getStoryVersion.mockResolvedValue(book)
+  await open('detail/88')
+
+  expect(wrapper.find('.detail-page .reader-loading').exists()).toBe(true)
+  expect(wrapper.find('.detail-page .detail-card').exists()).toBe(false)
+  expect(wrapper.find('.detail-page .empty-state').exists()).toBe(false)
+  expect(getStoryVersion).not.toHaveBeenCalled()
+
+  verifyIdentity([])
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2])
+  expect(wrapper.get('.detail-card h1').text()).toBe(book.title)
+  expect(getStoryVersion.mock.calls).toEqual([[88]])
+
+  releaseSecondPage()
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2, 3])
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63'))
+})
+
+it('opens cold-start API details when the version ID matches a local preview', async () => {
+  const releaseSecondPage = holdBookshelfPage(2)
+  const serverBook = { ...book, storyVersionId: 1001, title: '服务端绘本1001' }
+  let releaseFirstPage
+  let releaseDetails
+  listStorybooks.mockReturnValueOnce(new Promise((resolve) => { releaseFirstPage = resolve }))
+  getStoryVersion.mockReturnValueOnce(new Promise((resolve) => { releaseDetails = resolve }))
+  await open('detail/1001')
+
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1])
+  expect(wrapper.find('.detail-page .reader-loading').exists()).toBe(true)
+  expect(wrapper.find('.detail-page .detail-card').exists()).toBe(false)
+
+  releaseFirstPage([serverBook, ...firstPage.slice(1)])
+  await flushPromises()
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2])
+  expect(getStoryVersion.mock.calls).toEqual([[1001]])
+  expect(wrapper.find('.detail-page .reader-loading').exists()).toBe(true)
+
+  releaseDetails(serverBook)
+  await flushPromises()
+  expect(wrapper.get('.detail-card h1').text()).toBe(serverBook.title)
+  expect(listStorybooks.mock.calls.map(([query]) => query.page)).toEqual([1, 2])
+
+  releaseSecondPage()
+  await flushPromises()
+  expect(getStoryVersion).toHaveBeenCalledTimes(1)
+})
 
 it('displays the 31st book when a guardian loads the next library page', async () => {
   listStorybooks.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([{ ...book, storyVersionId: 31, title: '第31本绘本' }])

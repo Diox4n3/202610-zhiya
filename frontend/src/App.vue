@@ -112,7 +112,7 @@ onBeforeUnmount(() => {
     <BookDetailPage
       v-else-if="state.route.name === 'detail'"
       :book="detailBook"
-      :loading="state.detailLoading"
+      :loading="state.detailLoading || state.auth.status === 'checking'"
       @back="zhiyaActions.navigate('library')"
       @start="startBook"
     />
