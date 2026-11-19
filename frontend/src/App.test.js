@@ -381,6 +381,71 @@ it('superseded detail 404 keeps the same book after a newer detail request succe
   expect(wrapper.text()).not.toContain('资源不可用')
 })
 
+it.each(['404 first', '503 first'])('rechecks the shelf after a superseded detail 404 and a newer 503 (%s)', async (order) => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  const availableBook = { ...book, storyVersionId: 89, title: '仍可阅读的绘本' }
+  listStorybooks.mockResolvedValueOnce([book, availableBook]).mockResolvedValueOnce([availableBook])
+  let rejectOldDetails
+  let rejectNewDetails
+  getStoryVersion.mockReturnValueOnce(new Promise((_, reject) => { rejectOldDetails = reject }))
+    .mockReturnValueOnce(new Promise((_, reject) => { rejectNewDetails = reject }))
+  await open('detail/88')
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(book.title))
+  await wrapper.findAll('button').find((button) => button.text() === '查看详情').trigger('click')
+  await vi.waitFor(() => expect(getStoryVersion.mock.calls).toEqual([[88], [88]]))
+  const unavailable = new ApiError('暂不可用', { status: 503 })
+  if (order === '404 first') {
+    rejectOldDetails(missing())
+    await flushPromises()
+    expect(wrapper.find('.detail-page .reader-loading').exists()).toBe(true)
+    rejectNewDetails(unavailable)
+  } else {
+    rejectNewDetails(unavailable)
+    await flushPromises()
+    rejectOldDetails(missing())
+  }
+
+  await flushPromises()
+  expect(wrapper.get('.toast.show.error').text()).toContain('服务暂不可用')
+  expect(wrapper.find('.detail-card').exists()).toBe(false)
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(availableBook.title))
+  expect(wrapper.getComponent({ name: 'BookCarousel' }).props('books').map(({ storyVersionId }) => storyVersionId))
+    .toEqual([89])
+  expect(listStorybooks.mock.calls.map(([{ page }]) => page)).toEqual([1, 1])
+})
+
+it('keeps version 88 when the superseded detail 404 arrives before a newer success', async () => {
+  localStorage.setItem('zhiya.account', 'parent-a')
+  let rejectOldDetails
+  let resolveNewDetails
+  getStoryVersion.mockReturnValueOnce(new Promise((_, reject) => { rejectOldDetails = reject }))
+    .mockReturnValueOnce(new Promise((resolve) => { resolveNewDetails = resolve }))
+  await open('detail/88')
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(book.title))
+  await wrapper.findAll('button').find((button) => button.text() === '查看详情').trigger('click')
+  await vi.waitFor(() => expect(getStoryVersion.mock.calls).toEqual([[88], [88]]))
+
+  rejectOldDetails(missing())
+  await flushPromises()
+  expect(wrapper.find('.detail-page .reader-loading').exists()).toBe(true)
+  expect(wrapper.find('.toast.show.error').exists()).toBe(false)
+  const updatedBook = { ...book, title: '最新详情' }
+  resolveNewDetails(updatedBook)
+  await flushPromises()
+  expect(wrapper.get('.detail-card h1').text()).toBe(updatedBook.title)
+
+  await wrapper.get('.detail-toolbar button').trigger('click')
+  await vi.waitFor(() => expect(wrapper.get('.library-feature-copy h2').text()).toBe(book.title))
+  expect(wrapper.getComponent({ name: 'BookCarousel' }).props('books').map(({ storyVersionId }) => storyVersionId))
+    .toEqual([88])
+  expect(listStorybooks).toHaveBeenCalledTimes(1)
+})
+
 it('shelf coherence: refreshes after leaving detail while the same shelf restores its second page', async () => {
   const releaseSecondPage = holdBookshelfPage(2)
   let finishFirstPage

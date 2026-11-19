@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError } from './api/client'
+import { listProfiles } from './api/profiles'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
-import { createReadingSession } from './api/reading'
+import { createReadingSession, getReadingSession } from './api/reading'
 import { previewBooks } from './data/preview'
 
 vi.mock('./api/auth', () => ({ checkHealth: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []) }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
-vi.mock('./api/reading', () => ({ createReadingSession: vi.fn() }))
+vi.mock('./api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn() }))
 
 const selectionKey = 'zhiya.selectedBookId'
 const book = (storyVersionId) => ({
@@ -91,6 +92,51 @@ it('opens the online version from a cold detail link when the shelf returns 503'
   expect(listStorybooks).toHaveBeenCalledTimes(1)
   expect(getStoryVersion).toHaveBeenCalledWith(1001)
   expect(wrapper.get('.detail-card h1').text()).toBe(book(1001).title)
+})
+
+it.each([1001, 88])('keeps online version %s while retrying a failed identity check', async (storyVersionId) => {
+  const onlineBook = book(storyVersionId)
+  const profile = { childProfileId: 7 }
+  const session = {
+    readingSessionId: 55,
+    storyVersionId,
+    status: 'CREATED',
+    mode: 'PARENT_CHILD',
+    currentPage: 1,
+    visitedPageNumbers: [],
+    revision: 1,
+  }
+  listProfiles.mockRejectedValueOnce(new ApiError('档案暂不可用', { status: 503 }))
+  listStorybooks.mockResolvedValue([onlineBook])
+  getStoryVersion.mockResolvedValue(onlineBook)
+  createReadingSession.mockResolvedValueOnce(session)
+  getReadingSession.mockResolvedValueOnce({ session, events: [] })
+
+  await open('detail/api/' + storyVersionId)
+  expect(listProfiles).toHaveBeenCalledTimes(1)
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+  listProfiles.mockRejectedValueOnce(new ApiError('档案仍暂不可用', { status: 503 }))
+  await button('重试身份核验').trigger('click')
+  await flushPromises()
+  expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(button('重试身份核验').element.disabled).toBe(false)
+
+  expect(window.location.hash).toBe('#detail/api/' + storyVersionId)
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+  expect(wrapper.find('.reader-page').exists()).toBe(false)
+  expect(createReadingSession).not.toHaveBeenCalled()
+
+  listProfiles.mockResolvedValueOnce([profile])
+  await button('重试身份核验').trigger('click')
+  await flushPromises()
+  expect(listProfiles).toHaveBeenCalledTimes(3)
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+  expect(createReadingSession).not.toHaveBeenCalled()
+  await clickRoute(button('开始阅读'))
+
+  expect(createReadingSession.mock.calls).toEqual([[{ storyVersionId, childProfileId: 7 }]])
+  expect(window.location.hash).toBe('#reader/55')
+  expect(wrapper.get('.reader-page h1').text()).toBe(onlineBook.title)
 })
 
 it('keeps the homepage carousel rotating after the shelf defaults to the next page', async () => {

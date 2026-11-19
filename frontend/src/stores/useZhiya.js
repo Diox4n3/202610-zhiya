@@ -214,8 +214,11 @@ function loadPreviewBooks(message = '', emptyCatalog = false) {
   applyBooks(filtered, 'preview', message)
 }
 
-function loadBooks(filters = {}, restoreBookId = null) {
-  state.bookFilters = { ...state.bookFilters, ...filters }
+function loadBooks(filters = {}, restoreBookId = pendingBookRestore) {
+  const next = { ...state.bookFilters, ...filters }
+  if (next.ageBand !== state.bookFilters.ageBand || next.topic !== state.bookFilters.topic) {
+    state.bookFilters = next
+  }
   pendingBookRestore = state.bookFilters.ageBand || state.bookFilters.topic ? null : restoreBookId
   state.nextBooksPage = null
   return fetchBooksPage(1)
@@ -432,6 +435,8 @@ async function refreshIdentity() {
     } else if (previous === 'checking' || previous === 'unavailable') {
       state.auth.status = 'unavailable'
       loadPreviewBooks(state.health === 'offline' ? '后端暂未启动，当前展示本地设计预览。' : describeApiError(error))
+      // A failed identity retry does not invalidate an online detail already loaded for this route.
+      if (state.route.name === 'detail' && state.currentBook?.source === 'api' && state.currentBook.storyVersionId === state.route.versionId) return
     } else {
       return
     }
@@ -677,11 +682,40 @@ function openDetail(bookOrVersionId) {
   if (versionId) navigate(source ? `detail/${source}/${versionId}` : `detail/${versionId}`)
 }
 
+async function readOnlineDetail(versionId) {
+  // Keep overlapping reads in start order. A failed retry cannot settle whether a book is still available.
+  const reads = detailReadsByVersion.get(versionId) || []
+  const read = { outcome: 'pending', filters: state.bookFilters, epoch: authEpoch }
+  reads.push(read)
+  detailReadsByVersion.set(versionId, reads)
+  try {
+    const version = await getStoryVersion(versionId)
+    read.outcome = 'available'
+    return version
+  } catch (error) {
+    read.outcome = error.status === 404 ? 'missing' : 'failed'
+    throw error
+  } finally {
+    if (detailReadsByVersion.get(versionId) === reads) {
+      while (reads.at(-1)?.outcome === 'failed') reads.pop()
+      const latest = reads.at(-1)
+      if (latest?.outcome !== 'pending') {
+        detailReadsByVersion.delete(versionId)
+        if (latest?.outcome === 'missing' && latest.epoch === authEpoch && latest.filters === state.bookFilters) {
+          const remaining = state.books.filter((book) => book.storyVersionId !== versionId)
+          const listed = state.booksSource === 'api' && remaining.length < state.books.length
+          if (listed) applyBooks(remaining, 'api')
+          if (listed || state.booksLoading) void refreshShelfAfterNotFound()
+        }
+      }
+    }
+  }
+}
+
 async function loadDetail(id, source = null) {
   const versionId = Number(id)
   const epoch = authEpoch
   const request = ++detailRequest
-  const filtersAtStart = state.bookFilters
   const route = location.hash
   const isCurrent = () => epoch === authEpoch && request === detailRequest && route === location.hash
   state.detailLoading = true
@@ -697,22 +731,12 @@ async function loadDetail(id, source = null) {
       state.currentBook = preview || null
       return
     }
-    detailReadsByVersion.set(versionId, request)
-    const version = await getStoryVersion(versionId)
+    const version = await readOnlineDetail(versionId)
     if (!isCurrent()) return
     state.currentBook = mapApiBook(version)
   } catch (error) {
-    if (epoch !== authEpoch) return
-    // A different detail page can use this shelf too. Only a newer read of this version supersedes its 404.
-    if (error.status === 404 && state.bookFilters === filtersAtStart && detailReadsByVersion.get(versionId) === request) {
-      const remaining = state.books.filter((book) => book.storyVersionId !== versionId)
-      const listed = state.booksSource === 'api' && remaining.length < state.books.length
-      if (listed) applyBooks(remaining, 'api')
-      if (listed || state.booksLoading) void refreshShelfAfterNotFound()
-    }
     if (isCurrent()) setToast(describeApiError(error), 'error')
   } finally {
-    if (detailReadsByVersion.get(versionId) === request) detailReadsByVersion.delete(versionId)
     if (epoch === authEpoch && request === detailRequest) state.detailLoading = false
   }
 }
@@ -720,10 +744,22 @@ async function loadDetail(id, source = null) {
 async function startReading(book) {
   if (!book || state.sessionBusy) return
   const epoch = authEpoch
+  if (book.source !== 'preview' && state.auth.status !== 'authenticated') {
+    if (state.auth.status === 'unavailable' && !state.profilesLoading) {
+      const route = location.hash
+      await refreshIdentity()
+      if (epoch === authEpoch && route === location.hash && state.auth.status === 'unavailable') {
+        setToast('暂时无法核验家长身份，请稍后重试。', 'error')
+      }
+    } else if (state.auth.status === 'anonymous') {
+      navigate('auth')
+    }
+    return
+  }
   state.currentBook = book
   state.currentEvents = []
   state.currentReport = null
-  if (book.source === 'preview' || !state.auth.authenticated) {
+  if (book.source === 'preview') {
     state.currentSession = {
       preview: true,
       readingSessionId: `preview-${book.storyVersionId}`,
@@ -742,7 +778,7 @@ async function startReading(book) {
     navigate('account/children')
     return
   }
-  // A new shelf query replaces the filters object; loading another page keeps it.
+  // Reapplying the same filters or loading another page keeps the same shelf.
   const filtersAtStart = state.bookFilters
   try {
     state.sessionBusy = true

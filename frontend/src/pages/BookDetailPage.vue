@@ -3,6 +3,8 @@ import { bookStatusLabel } from '../data/preview'
 defineProps({
   book: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  retryIdentity: { type: Boolean, default: false },
+  checkingIdentity: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['back', 'start'])
@@ -31,7 +33,9 @@ const emit = defineEmits(['back', 'start'])
         <p class="detail-summary">{{ book.summary }}</p>
         <blockquote v-if="book.quote" class="detail-quote">{{ book.quote }}</blockquote>
         <div class="detail-actions">
-          <button class="primary" type="button" @click="emit('start', book)">开始阅读</button>
+          <button class="primary" type="button" :disabled="retryIdentity && checkingIdentity" @click="emit('start', book)">
+            {{ retryIdentity ? (checkingIdentity ? '正在核验身份…' : '重试身份核验') : '开始阅读' }}
+          </button>
           <button class="secondary" type="button" @click="emit('back')">继续选书</button>
         </div>
       </div>
