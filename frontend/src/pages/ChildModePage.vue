@@ -52,9 +52,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <section class="child-handoff-card">
       <div class="child-mode-mark" aria-hidden="true">芽</div>
       <p class="eyebrow">儿童自主阅读模式</p>
-      <h1>阅读空间已为孩子准备好</h1>
+      <h1>{{ auth.status === 'handoff' ? '请家长解锁设备' : '阅读空间已为孩子准备好' }}</h1>
       <p v-if="book" class="child-handoff-book">当前绘本：{{ book.title }}</p>
-      <p>
+      <p v-if="auth.status !== 'handoff'">
         本次剩余：{{ remaining }}
         <template v-if="Number.isInteger(childMode?.allowedStoryVersionCount)">
           · 已授权 {{ childMode.allowedStoryVersionCount }} 个绘本版本

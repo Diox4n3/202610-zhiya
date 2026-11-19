@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { describeApiError } from '../api/client'
+import { ageLabels } from '../data/preview'
 
 const props = defineProps({
   section: { type: String, default: 'overview' },
@@ -8,8 +9,9 @@ const props = defineProps({
   profiles: { type: Array, default: () => [] },
   profilesError: { type: String, default: '' },
   profilesLoading: { type: Boolean, default: false },
-  activeProfileId: { type: Number, default: 0 },
+  activeProfileId: { type: Number, default: null },
   sessions: { type: Array, default: () => [] },
+  sessionsError: { type: String, default: '' },
   books: { type: Array, default: () => [] },
   totals: { type: Object, required: true },
   loading: { type: Boolean, default: false },
@@ -19,7 +21,7 @@ const props = defineProps({
   reloadAccountDataAction: { type: Function, default: async () => false },
 })
 
-const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start'])
+const emit = defineEmits(['navigate', 'select-profile', 'sign-out', 'start', 'reload-sessions'])
 const editing = ref(false)
 const saving = ref(false)
 const saveError = ref('')
@@ -37,10 +39,18 @@ const nav = [
   ['growth', '成长记录', '⌁'],
   ['plan', '阅读计划', '▦'],
 ]
-const activeProfile = computed(() =>
-  props.profiles.find((profile) => profile.childProfileId === props.activeProfileId) || props.profiles[0] || null,
-)
+const activeProfile = computed(() => {
+  if (props.activeProfileId === null) return props.profiles[0] || null
+  return props.profiles.find((profile) => profile.childProfileId === props.activeProfileId) || null
+})
+const profileAction = computed(() => props.profiles.length ? '选择儿童档案' : '添加儿童档案')
 const recentSessions = computed(() => props.sessions.slice(0, 4))
+const sessionStatusLabels = {
+  CREATED: '未开始',
+  IN_PROGRESS: '阅读中',
+  FINISHED: '已完成',
+  INTERRUPTED: '已中断',
+}
 
 function openNew() {
   if (saving.value) return
@@ -100,7 +110,11 @@ function sessionRecordLabel(session) {
 
 function askDeleteProfile(profile) {
   deleteError.value = ''
-  deleteTarget.value = { type: 'profile', id: profile.childProfileId, title: profile.nickname || '这个儿童档案' }
+  deleteTarget.value = {
+    type: 'profile',
+    id: profile.childProfileId,
+    title: `${profile.nickname || '未命名宝贝'}（档案 #${profile.childProfileId}）`,
+  }
 }
 
 function askDeleteSession(session) {
@@ -138,7 +152,7 @@ async function confirmDelete() {
           <div><strong>{{ auth.nickname }}</strong><small>{{ auth.account || '本地预览账号' }}</small></div>
         </div>
         <button class="pill child-switch" type="button" @click="emit('navigate', 'account/children')">
-          <span>{{ activeProfile ? `${activeProfile.nickname || '宝贝'} · ${activeProfile.ageBand.replaceAll('_', ' ')}` : '添加孩子档案' }}</span><span>⌄</span>
+          <span>{{ activeProfile ? `${activeProfile.nickname || '宝贝'} · ${ageLabels[activeProfile.ageBand] || '年龄段暂缺'}` : profileAction }}</span><span>⌄</span>
         </button>
         <nav class="account-nav" aria-label="个人中心功能">
           <button
@@ -162,6 +176,10 @@ async function confirmDelete() {
             {{ profilesLoading ? '正在重新读取…' : '重新读取家长资料' }}
           </button>
         </div>
+        <div v-if="sessionsError" class="account-data-error" role="alert">
+          <span>阅读记录暂未更新。{{ sessionsError }}</span>
+          <button class="secondary" type="button" :disabled="loading" @click="emit('reload-sessions')">重新读取阅读记录</button>
+        </div>
         <template v-if="section === 'children'">
           <div class="account-title">
             <div><h1>我的宝贝</h1><p>记录孩子的成长，让每一次阅读都更有意义。</p></div>
@@ -171,7 +189,7 @@ async function confirmDelete() {
             <article v-for="profile in profiles" :key="profile.childProfileId" class="account-card child-card" :class="{ active: profile.childProfileId === activeProfileId }">
               <div class="child-avatar">{{ profile.nickname?.slice(0, 1) || '芽' }}</div>
               <h2>{{ profile.nickname || '未命名宝贝' }}</h2>
-              <p>{{ profile.ageBand.replaceAll('_', ' ') }} · 每日 {{ profile.preferredMinutes }} 分钟</p>
+              <p>档案 #{{ profile.childProfileId }} · {{ ageLabels[profile.ageBand] || '年龄段暂缺' }} · 每日 {{ profile.preferredMinutes }} 分钟</p>
               <div class="book-meta"><span v-for="interest in profile.interests" :key="interest">{{ interest }}</span></div>
               <div class="card-actions">
                 <button class="secondary" type="button" @click="emit('select-profile', profile.childProfileId)">切换</button>
@@ -187,9 +205,7 @@ async function confirmDelete() {
             <label class="form-field"><span>昵称</span><input v-model="form.nickname" maxlength="32"></label>
             <label class="form-field"><span>年龄段</span>
               <select v-model="form.ageBand">
-                <option value="AGE_3_4">3–4 岁</option>
-                <option value="AGE_4_5">4–5 岁</option>
-                <option value="AGE_5_6">5–6 岁</option>
+                <option v-for="(label, band) in ageLabels" :key="band" :value="band">{{ label }}</option>
               </select>
             </label>
             <label class="form-field"><span>兴趣</span><input v-model="form.interests" placeholder="用顿号分隔，例如：动物、自然"></label>
@@ -209,14 +225,14 @@ async function confirmDelete() {
           <div v-if="loading" class="reader-loading"><div class="spinner" /></div>
           <div v-else-if="sessions.length" class="recent-list">
             <article v-for="session in sessions" :key="session.readingSessionId" class="recent-item">
-              <div><strong>{{ sessionTitle(session) }}</strong><p>{{ sessionRecordLabel(session) }} · 浏览 {{ session.visitedPageNumbers.length }} 页 · {{ session.status }}</p></div>
+              <div><strong>{{ sessionTitle(session) }}</strong><p>{{ sessionRecordLabel(session) }} · 浏览 {{ session.visitedPageNumbers.length }} 页 · {{ sessionStatusLabels[session.status] || '状态待确认' }}</p></div>
               <div class="recent-item-actions">
                 <span class="pill">修订 {{ session.revision }}</span>
                 <button class="danger" type="button" :disabled="deleteBusy" @click="askDeleteSession(session)">删除记录</button>
               </div>
             </article>
           </div>
-          <div v-else class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
+          <div v-else-if="!sessionsError" class="empty-state"><div><h2>还没有真实阅读记录</h2><p>从绘本馆开始一次后端阅读后，这里会自动出现记录。</p><button class="primary" type="button" @click="emit('navigate', 'library')">去绘本馆</button></div></div>
         </template>
 
         <template v-else-if="section === 'shelf'">
@@ -257,7 +273,8 @@ async function confirmDelete() {
             <div class="account-hero-copy">
               <p class="eyebrow">今天也来陪孩子读一点</p>
               <h1>{{ activeProfile?.nickname || '孩子' }}的阅读空间</h1>
-              <p>{{ activeProfile?.interests?.join(' · ') || '添加儿童档案后开始个性化阅读' }}</p>
+              <p v-if="!activeProfile">{{ profileAction }}后开始个性化阅读</p>
+              <p v-else-if="activeProfile.interests?.length">{{ activeProfile.interests.join(' · ') }}</p>
               <button class="secondary" type="button" @click="emit('navigate', 'account/children')">管理儿童档案</button>
             </div>
             <div class="hero-illustration"><img src="/assets/reader-scene.svg" alt=""></div>
@@ -266,14 +283,14 @@ async function confirmDelete() {
             <div class="stat-card"><span>已完成/进行中会话</span><strong>{{ totals.sessions }}</strong></div>
             <div class="stat-card"><span>访问绘本</span><strong>{{ totals.read }}</strong></div>
             <div class="stat-card"><span>浏览页面</span><strong>{{ totals.pages }}</strong></div>
-            <div class="stat-card"><span>当前档案</span><strong>{{ activeProfile ? '已选择' : '待添加' }}</strong></div>
+            <div class="stat-card"><span>当前档案</span><strong>{{ activeProfile ? '已选择' : (profiles.length ? '待选择' : '待添加') }}</strong></div>
           </div>
           <section class="account-card">
             <div class="account-card-head"><h2>最近阅读</h2><button class="text-button" type="button" @click="emit('navigate', 'account/growth')">查看全部</button></div>
             <div v-if="recentSessions.length" class="recent-list">
-              <article v-for="session in recentSessions" :key="session.readingSessionId" class="recent-item"><strong>{{ sessionTitle(session) }}</strong><span>第 {{ session.currentPage }} 页 · {{ session.status }}</span></article>
+              <article v-for="session in recentSessions" :key="session.readingSessionId" class="recent-item"><strong>{{ sessionTitle(session) }}</strong><span>第 {{ session.currentPage }} 页 · {{ sessionStatusLabels[session.status] || '状态待确认' }}</span></article>
             </div>
-            <p v-else class="address">还没有真实阅读会话，从绘本馆开始一次亲子共读吧。</p>
+            <p v-else-if="!loading && !sessionsError" class="address">还没有真实阅读会话，从绘本馆开始一次亲子共读吧。</p>
           </section>
         </template>
       </section>

@@ -42,10 +42,14 @@ function onHashChange() {
 
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
+  window.addEventListener('focus', zhiyaActions.refreshIdentity)
   zhiyaActions.bootstrap()
 })
 
-onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', onHashChange)
+  window.removeEventListener('focus', zhiyaActions.refreshIdentity)
+})
 </script>
 
 <template>
@@ -90,12 +94,14 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :books="state.books"
       :selected-id="state.selectedBookId"
       :loading="state.booksLoading"
+      :next-page="state.nextBooksPage"
       :source="state.booksSource"
       :error="state.booksError"
       @select="zhiyaActions.selectBook"
       @detail="openDetail"
       @start="startBook"
       @filter="zhiyaActions.loadBooks"
+      @more="zhiyaActions.loadMoreBooks"
       @login="zhiyaActions.navigate('auth')"
     />
     <BookDetailPage
@@ -131,6 +137,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :profiles-loading="state.profilesLoading"
       :active-profile-id="state.activeProfileId"
       :sessions="state.sessions"
+      :sessions-error="state.sessionsError"
       :books="state.books"
       :totals="totals"
       :loading="state.sessionsLoading"
@@ -139,7 +146,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :save-profile-action="handleProfileSave"
       :delete-profile-action="zhiyaActions.removeProfile"
       :delete-session-action="zhiyaActions.removeReadingSession"
-      :reload-account-data-action="zhiyaActions.reloadAccountData"
+      :reload-account-data-action="zhiyaActions.reloadProfiles"
+      @reload-sessions="zhiyaActions.loadSessions"
       @sign-out="zhiyaActions.signOut"
       @start="startBook"
     />

@@ -234,6 +234,28 @@ describe('account isolation and logout', () => {
     expect(state.booksSource).toBe('preview')
   })
 
+  it.each(['success', 'failure'])('keeps a newer child selection after a late profile lookup %s', async (outcome) => {
+    await actions.signIn('parent-a', 'password123')
+    const lookup = deferred()
+    profiles.listProfiles.mockReturnValueOnce(lookup.promise)
+    reading.createReadingSession.mockRejectedValueOnce(new ApiError('资源不可用', { status: 404 }))
+    const start = actions.startReading(state.books[0])
+    await Promise.resolve()
+    expect(profiles.listProfiles).toHaveBeenCalledTimes(2)
+
+    const replacement = { childProfileId: 9, nickname: '小禾' }
+    profiles.listProfiles.mockResolvedValueOnce([replacement])
+    await actions.loadProfiles()
+    actions.selectProfile(replacement.childProfileId)
+    if (outcome === 'success') lookup.resolve([])
+    else lookup.reject(new ApiError('暂不可用', { status: 503 }))
+    await start
+    expect(state.profiles).toEqual([replacement])
+    expect(state.activeProfileId).toBe(9)
+    expect(state.toast.message).toContain('小禾')
+    expect(books.listStorybooks).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores an old session response after changing routes', async () => {
     const pending = deferred()
     reading.getReadingSession.mockReturnValueOnce(pending.promise)
@@ -262,6 +284,24 @@ describe('account isolation and logout', () => {
     expect(await actions.removeReadingSession(55)).toBe(true)
     expect(reading.deleteReadingSession).toHaveBeenCalledWith(55)
     expect(state.sessions).toEqual([])
+  })
+
+  it('ignores a pre-deletion history read arriving after the fresh list', async () => {
+    await actions.signIn('parent-a', 'password123')
+    const deleted = session({ readingSessionId: 11, storyVersionId: 1, visitedPageNumbers: [1, 2] })
+    const remaining = session({ readingSessionId: 12, storyVersionId: 2 })
+    reading.listReadingSessions.mockResolvedValueOnce([deleted, remaining])
+    await actions.loadSessions()
+    const oldRead = deferred()
+    reading.listReadingSessions.mockReturnValueOnce(oldRead.promise).mockResolvedValueOnce([remaining])
+    const oldHistory = actions.loadSessions()
+    expect(await actions.removeReadingSession(11)).toBe(true)
+    oldRead.resolve([deleted, remaining])
+    await oldHistory
+    const { totals } = await import('./useZhiya')
+    expect(state.sessions.map(item => item.readingSessionId)).toEqual([12])
+    expect(totals.value).toEqual({ sessions: 1, read: 1, pages: 1 })
+    expect(state.sessionsLoading).toBe(false)
   })
 
   it('keeps a deleted profile removed when refreshing its list fails', async () => {
@@ -350,9 +390,25 @@ describe('child-mode handoff', () => {
     expect(auth.parentUnlock).toHaveBeenCalledTimes(1)
 
     profiles.listProfiles.mockResolvedValueOnce([{ childProfileId: 1, nickname: '小芽' }])
-    expect(await actions.reloadAccountData()).toBe(true)
+    expect(await actions.reloadProfiles()).toBe(true)
     expect(state.profiles).toEqual([{ childProfileId: 1, nickname: '小芽' }])
+    expect(reading.listReadingSessions).toHaveBeenCalledTimes(1)
+    expect(books.listStorybooks).toHaveBeenCalledTimes(1)
     expect(auth.parentUnlock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a rejected password on the handoff and routes a lost credential to login', async () => {
+    window.history.replaceState({}, '', '/#child/55')
+    await actions.syncRoute()
+    profiles.listProfiles.mockRejectedValueOnce(new ApiError('请先登录', { status: 401, code: 'AUTH_REQUIRED' }))
+    await actions.bootstrap()
+    expect(state.auth.authenticated).toBe(false)
+    auth.parentUnlock.mockRejectedValueOnce(new ApiError('账号或密码错误', { status: 401, code: 'INVALID_CREDENTIALS' }))
+    await expect(actions.unlockChildMode('parent-a', 'wrong-password')).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' })
+    expect(location.hash).toBe('#child/55')
+    auth.parentUnlock.mockRejectedValueOnce(new ApiError('请先登录', { status: 401, code: 'AUTH_REQUIRED' }))
+    expect(await actions.unlockChildMode('parent-a', 'password123')).toBe(false)
+    expect(location.hash).toBe('#auth')
   })
 
   it('does not claim an exact authorization count that cannot be restored', async () => {

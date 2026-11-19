@@ -77,6 +77,22 @@ describe('forms wait for completion', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
+  it.each([null, '小芽'])('identifies both profiles on their cards and confirmations for nickname %s', async nickname => {
+    const profiles = [7, 8].map(childProfileId => ({ childProfileId, nickname, ageBand: 'AGE_4_5', interests: [], preferredMinutes: 10 }))
+    const wrapper = render(AccountPage, {
+      section: 'children', auth: { authenticated: true }, profiles,
+      totals: { read: 0, pages: 0, sessions: 0 }, saveProfileAction: vi.fn(),
+    })
+    for (const [index, card] of wrapper.findAll('.child-card').entries()) {
+      const label = '档案 #' + profiles[index].childProfileId
+      expect(card.text()).toContain(label)
+      await card.get('button.danger').trigger('click')
+      const dialog = wrapper.get('[role="dialog"]')
+      expect(dialog.text()).toContain(label)
+      await dialog.get('.modal-close').trigger('click')
+    }
+  })
+
   it('confirms reading-history deletion without removing successful-row state early', async () => {
     const request = deferred()
     const remove = vi.fn().mockReturnValue(request.promise)
@@ -201,6 +217,29 @@ describe('child-mode parent unlock', () => {
     })
     expect(wrapper.text()).toContain('以儿童端显示为准')
     expect(wrapper.text()).not.toContain('已授权')
+  })
+})
+
+describe('account display labels', () => {
+  it('shows readable ages and reading states in profiles and both history lists', async () => {
+    const statuses = ['CREATED', 'IN_PROGRESS', 'FINISHED', 'INTERRUPTED']
+    const wrapper = render(AccountPage, {
+      section: 'children', auth: {}, totals: {}, saveProfileAction: vi.fn(),
+      profiles: [{ childProfileId: 1, ageBand: 'AGE_4_5', preferredMinutes: 15 }],
+      sessions: statuses.map((status, index) => ({
+        readingSessionId: index + 1, status, currentPage: 1, visitedPageNumbers: [1],
+      })),
+    })
+    expect(wrapper.get('.child-switch').text()).toContain('4–5 岁')
+    expect(wrapper.get('.child-card').text()).toContain('4–5 岁')
+    for (const section of ['overview', 'growth']) {
+      await wrapper.setProps({ section })
+      const labels = wrapper.findAll('.recent-item').map((item) => item.text())
+      for (const [index, label] of ['未开始', '阅读中', '已完成', '已中断'].entries()) {
+        expect(labels[index]).toContain(label)
+        expect(labels[index]).not.toContain(statuses[index])
+      }
+    }
   })
 })
 
