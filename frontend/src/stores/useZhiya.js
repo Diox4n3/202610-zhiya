@@ -5,12 +5,14 @@ import { createProfile, deleteProfile, listProfiles, updateProfile } from '../ap
 import { getStoryVersion, listStorybooks } from '../api/storybooks'
 import {
   addReadingEvent,
+  chooseReadingBranch,
   completeReadingSession,
   createReadingSession,
   deleteReadingSession,
   getDeletionStatus,
   getReadingSession,
   listReadingSessions,
+  requestReadingGuidance,
   updateReadingMode,
 } from '../api/reading'
 import { previewBooks, mapApiBook } from '../data/preview'
@@ -1105,20 +1107,76 @@ function sameReading(operation, epoch, generation) {
   return epoch === authEpoch && generation === readingEpoch && state.currentSession?.readingSessionId === operation.sessionId
 }
 
+function appendReadingInteraction(operation, result) {
+  const session = state.currentSession
+  let event
+  if (operation.kind === 'guidance') {
+    const initial = operation.payload.feedback === 'INITIAL'
+    event = {
+      interactionEventId: result.interactionEventId,
+      eventType: initial ? 'QUESTION' : 'FEEDBACK',
+      pageNumber: operation.payload.pageNumber,
+      outputText: result.outputText,
+      strategyType: result.strategyType,
+      feedback: initial ? null : operation.payload.feedback,
+    }
+    session.revision = result.revision
+  } else if (operation.kind === 'answer') {
+    event = {
+      interactionEventId: result.interactionEventId,
+      eventType: 'ANSWER',
+      pageNumber: operation.payload.pageNumber,
+      inputText: operation.payload.inputText,
+    }
+    session.revision = result.revision
+  } else if (operation.kind === 'branch') {
+    event = {
+      interactionEventId: result.interactionEventId,
+      eventType: 'BRANCH_CHOSEN',
+      pageNumber: operation.pageNumber,
+      branchId: result.branchId,
+    }
+    session.currentPage = result.currentPage
+    session.visitedPageNumbers = result.visitedPageNumbers
+    session.revision = result.revision
+    session.status = 'IN_PROGRESS'
+  }
+  if (event) state.currentEvents = [...state.currentEvents, event]
+}
+
+function readingRequest(operation) {
+  if (operation.kind === 'finish') return completeReadingSession(operation.sessionId, operation.payload)
+  if (operation.kind === 'guidance') return requestReadingGuidance(operation.sessionId, operation.payload)
+  if (operation.kind === 'branch') return chooseReadingBranch(operation.sessionId, operation.payload)
+  return addReadingEvent(operation.sessionId, operation.payload)
+}
+
 async function writeReading(operation) {
   if (state.sessionBusy) return false
   const epoch = authEpoch
   const generation = readingEpoch
   state.sessionBusy = true
   try {
-    const result = operation.kind === 'finish'
-      ? await completeReadingSession(operation.sessionId, operation.payload)
-      : await addReadingEvent(operation.sessionId, operation.payload)
+    const result = await readingRequest(operation)
     if (!sameReading(operation, epoch, generation)) return false
     if (operation.kind === 'finish') {
       state.currentSession = result.session
       state.currentReport = result.report
       setToast('阅读记录已保存')
+    } else if (operation.kind === 'guidance') {
+      appendReadingInteraction(operation, result)
+      const feedback = operation.payload.feedback
+      setToast(feedback === 'INITIAL'
+        ? '已生成本页共读问题'
+        : feedback === 'SKIPPED'
+          ? '已跳过本页提问'
+          : '已根据理解程度换一个引导问题')
+    } else if (operation.kind === 'answer') {
+      appendReadingInteraction(operation, result)
+      setToast('孩子的回答已保存')
+    } else if (operation.kind === 'branch') {
+      appendReadingInteraction(operation, result)
+      setToast(`已进入第 ${result.currentPage} 页的故事分支`)
     } else {
       const session = state.currentSession
       session.currentPage = operation.payload.pageNumber
@@ -1214,6 +1272,65 @@ async function recordPageChange(pageNumber) {
       pageNumber,
       expectedRevision: session.revision,
       clientEventId: createClientEventId('page'),
+    },
+  })
+}
+
+async function requestGuidance(feedback = 'INITIAL') {
+  const session = state.currentSession
+  if (!session || session.preview || session.status !== 'IN_PROGRESS'
+      || state.sessionBusy || state.readingSyncRequired
+      || !['INITIAL', 'UNDERSTOOD', 'NOT_UNDERSTOOD', 'SKIPPED'].includes(feedback)) {
+    return false
+  }
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'guidance',
+    payload: {
+      pageNumber: session.currentPage,
+      feedback,
+      expectedRevision: session.revision,
+      clientEventId: createClientEventId('guidance'),
+    },
+  })
+}
+
+async function submitAnswer(inputText) {
+  const session = state.currentSession
+  const text = typeof inputText === 'string' ? inputText.trim() : ''
+  if (!session || session.preview || session.status !== 'IN_PROGRESS'
+      || state.sessionBusy || state.readingSyncRequired
+      || !text || text.length > 200) {
+    return false
+  }
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'answer',
+    payload: {
+      eventType: 'ANSWER',
+      pageNumber: session.currentPage,
+      inputText: text,
+      expectedRevision: session.revision,
+      clientEventId: createClientEventId('answer'),
+    },
+  })
+}
+
+async function chooseBranch(branchId) {
+  const session = state.currentSession
+  if (!session || session.preview || session.status !== 'IN_PROGRESS'
+      || state.sessionBusy || state.readingSyncRequired
+      || !Number.isInteger(branchId) || branchId < 1) {
+    return false
+  }
+  return writeReading({
+    sessionId: session.readingSessionId,
+    kind: 'branch',
+    pageNumber: session.currentPage,
+    payload: {
+      branchId,
+      expectedRevision: session.revision,
+      clientEventId: createClientEventId('branch'),
     },
   })
 }
@@ -1352,6 +1469,9 @@ export const zhiyaActions = {
   restoreChildMode,
   loadReaderRoute,
   recordPageChange,
+  requestGuidance,
+  submitAnswer,
+  chooseBranch,
   completeReading,
   removeReadingSession,
   refreshReading,
