@@ -1,6 +1,6 @@
 import { computed, reactive, readonly } from 'vue'
 import { ApiError, createClientEventId, describeApiError, readCsrfCookie } from '../api/client'
-import { checkHealth, login, logout, parentUnlock, register } from '../api/auth'
+import { checkHealth, currentIdentity, login, logout, parentUnlock, register } from '../api/auth'
 import {
   createAdminKnowledge,
   createAdminStory,
@@ -101,6 +101,10 @@ const state = reactive({
   admin: {
     storyVersions: [],
     knowledgeItems: [],
+    storiesLoaded: false,
+    storiesLoading: false,
+    knowledgeLoaded: false,
+    knowledgeError: '',
     loading: false,
     busy: false,
     error: '',
@@ -124,10 +128,12 @@ let sessionsRequest = 0
 let recommendationRequest = 0
 let readingEpoch = 0
 let pendingReading = null
+let activeInitialGuidance = null
 
 function clearAccountViews() {
   clearTimeout(toastTimer)
   state.toast = { message: '', tone: 'info', visible: false }
+  activeInitialGuidance = null
   state.profiles = []
   state.profilesLoading = false
   state.profilesError = ''
@@ -141,6 +147,10 @@ function clearAccountViews() {
   state.recommendationsError = ''
   state.admin.storyVersions = []
   state.admin.knowledgeItems = []
+  state.admin.storiesLoaded = false
+  state.admin.storiesLoading = false
+  state.admin.knowledgeLoaded = false
+  state.admin.knowledgeError = ''
   state.admin.loading = false
   state.admin.busy = false
   state.admin.error = ''
@@ -345,16 +355,22 @@ function loadMoreBooks() {
   }
 }
 
+function clearRecommendations() {
+  recommendationRequest += 1
+  state.recommendations = []
+  state.recommendationsError = ''
+  state.recommendationsLoading = false
+}
+
 async function loadRecommendations(topic = state.recommendationTopic) {
   const profile = activeProfile()
   if (!profile || !state.auth.authenticated || state.auth.role !== 'GUARDIAN') {
-    state.recommendations = []
-    state.recommendationsError = ''
-    state.recommendationsLoading = false
+    clearRecommendations()
     return false
   }
   const epoch = authEpoch
   const request = ++recommendationRequest
+  const isCurrent = () => epoch === authEpoch && request === recommendationRequest && activeProfile()?.childProfileId === profile.childProfileId
   state.recommendationTopic = String(topic || '').trim()
   state.recommendationsLoading = true
   state.recommendationsError = ''
@@ -364,11 +380,11 @@ async function loadRecommendations(topic = state.recommendationTopic) {
       topic: state.recommendationTopic || undefined,
       minutes: profile.preferredMinutes,
     })
-    if (epoch !== authEpoch || request !== recommendationRequest) return false
+    if (!isCurrent()) return false
     const books = new Map(state.books.filter((book) => book.source === 'api').map((book) => [book.storyVersionId, book]))
     const missing = items.map((item) => item.storyVersionId).filter((id) => !books.has(id))
     const loaded = await Promise.allSettled(missing.map((id) => getStoryVersion(id)))
-    if (epoch !== authEpoch || request !== recommendationRequest) return false
+    if (!isCurrent()) return false
     for (const result of loaded) {
       if (result.status === 'fulfilled') {
         const book = mapApiBook(result.value)
@@ -381,44 +397,49 @@ async function loadRecommendations(topic = state.recommendationTopic) {
     })
     return true
   } catch (error) {
-    if (epoch === authEpoch && request === recommendationRequest) {
+    if (isCurrent()) {
       state.recommendations = []
       state.recommendationsError = describeApiError(error)
     }
     return false
   } finally {
-    if (epoch === authEpoch && request === recommendationRequest) state.recommendationsLoading = false
+    if (isCurrent()) state.recommendationsLoading = false
   }
 }
 
-async function loadAdminContent() {
-  if (!state.auth.authenticated) return false
+async function loadAdminContent(section = state.route.section) {
+  const knowledge = section === 'knowledge'
+  const loading = knowledge ? 'loading' : 'storiesLoading'
+  const loaded = knowledge ? 'knowledgeLoaded' : 'storiesLoaded'
+  const errorField = knowledge ? 'knowledgeError' : 'error'
+  const list = knowledge ? listAdminKnowledge : listAdminStoryVersions
+  if (!state.auth.authenticated || state.auth.role !== 'ADMIN' || state.admin[loading]) return false
   const epoch = authEpoch
-  state.admin.loading = true
-  state.admin.error = ''
+  state.admin[loading] = true
+  state.admin[errorField] = ''
   try {
-    const [stories, knowledge] = await Promise.all([
-      listAdminStoryVersions({ pageSize: 100 }),
-      listAdminKnowledge({ pageSize: 100 }),
-    ])
-    if (epoch !== authEpoch || !state.auth.authenticated) return false
-    state.admin.storyVersions = stories.items
-    state.admin.knowledgeItems = knowledge.items
+    const items = []
+    const pageSize = 50
+    for (let page = 1; ; page += 1) {
+      const result = await list({ page, pageSize })
+      if (epoch !== authEpoch) return false
+      items.push(...result.items)
+      if (result.items.length < pageSize) break
+    }
+    state.admin[knowledge ? 'knowledgeItems' : 'storyVersions'] = items
+    state.admin[loaded] = true
     return true
   } catch (error) {
-    if (epoch === authEpoch) {
-      state.admin.error = error.status === 404
-        ? '后端尚未提供内容管理接口。页面已按 API-027～031 契约准备，接口上线后可直接读取。'
-        : describeApiError(error)
-    }
+    if (epoch === authEpoch) state.admin[errorField] = error.status === 404
+      ? (knowledge ? '后端尚未提供知识管理接口。' : '后端尚未提供绘本列表接口。') : describeApiError(error)
     return false
   } finally {
-    if (epoch === authEpoch) state.admin.loading = false
+    if (epoch === authEpoch) state.admin[loading] = false
   }
 }
 
 async function adminCreateStory(payload) {
-  if (state.admin.busy || !state.auth.authenticated) return false
+  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.error = ''
@@ -430,7 +451,7 @@ async function adminCreateStory(payload) {
     return true
   } catch (error) {
     if (epoch === authEpoch) {
-      state.admin.error = describeApiError(error)
+      state.admin.error = error.status === 404 ? '后端尚未提供绘本创建接口。' : describeApiError(error)
       setToast(state.admin.error, 'error')
     }
     return false
@@ -440,7 +461,7 @@ async function adminCreateStory(payload) {
 }
 
 async function adminSetStoryStatus(versionId, status) {
-  if (state.admin.busy || !state.auth.authenticated) return false
+  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.error = ''
@@ -464,10 +485,10 @@ async function adminSetStoryStatus(versionId, status) {
 }
 
 async function adminCreateKnowledge(payload) {
-  if (state.admin.busy || !state.auth.authenticated) return false
+  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
   const epoch = authEpoch
   state.admin.busy = true
-  state.admin.error = ''
+  state.admin.knowledgeError = ''
   try {
     const item = await createAdminKnowledge(payload)
     if (epoch !== authEpoch) return false
@@ -476,8 +497,8 @@ async function adminCreateKnowledge(payload) {
     return true
   } catch (error) {
     if (epoch === authEpoch) {
-      state.admin.error = describeApiError(error)
-      setToast(state.admin.error, 'error')
+      state.admin.knowledgeError = describeApiError(error)
+      setToast(state.admin.knowledgeError, 'error')
     }
     return false
   } finally {
@@ -486,21 +507,21 @@ async function adminCreateKnowledge(payload) {
 }
 
 async function adminUpdateKnowledge(knowledgeId, payload) {
-  if (state.admin.busy || !state.auth.authenticated) return false
+  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
   const epoch = authEpoch
   state.admin.busy = true
-  state.admin.error = ''
+  state.admin.knowledgeError = ''
   try {
     const item = await updateAdminKnowledge(knowledgeId, payload)
     if (epoch !== authEpoch) return false
-    await loadAdminContent()
+    await loadAdminContent('knowledge')
     if (epoch !== authEpoch) return false
     setToast(item.status === 'RETIRED' ? '知识条目已停用' : '已创建新的知识版本')
     return true
   } catch (error) {
     if (epoch === authEpoch) {
-      state.admin.error = describeApiError(error)
-      setToast(state.admin.error, 'error')
+      state.admin.knowledgeError = describeApiError(error)
+      setToast(state.admin.knowledgeError, 'error')
     }
     return false
   } finally {
@@ -524,12 +545,14 @@ async function loadProfiles() {
     const items = await listProfiles()
     if (!isCurrent()) return null
     state.profiles = items
+    const previousId = state.activeProfileId
     // Only a new login defaults to the first child. A removed selection needs a guardian's choice.
     if (state.activeProfileId === null) {
       state.activeProfileId = items[0]?.childProfileId || 0
     } else if (!items.some((profile) => profile.childProfileId === state.activeProfileId)) {
       state.activeProfileId = 0
     }
+    if (previousId !== state.activeProfileId) clearRecommendations()
     if (items.length) localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
     else localStorage.removeItem('zhiya.activeProfileId')
     return items
@@ -594,6 +617,15 @@ async function refreshIdentity() {
   const verifying = previous === 'verifying-handoff'
   if (previous === 'child' || previous === 'handoff' || verifying) state.activeProfileId = savedProfileId()
   try {
+    const identity = await currentIdentity()
+    if (epoch !== authEpoch) return
+    if (identity.role === 'ADMIN') {
+      state.auth = { ...state.auth, status: 'authenticated', authenticated: true, role: 'ADMIN',
+        accountId: identity.accountId, account: localStorage.getItem('zhiya.account') || '' }
+      if (state.route.name !== 'admin') replaceRoute('admin/storybooks')
+      await handleRoute()
+      return
+    }
     const profiles = await loadProfiles()
     if (!profiles || epoch !== authEpoch) return
     if (previous === 'authenticated') return
@@ -671,18 +703,22 @@ async function signIn(account, password) {
     throw error
   }
   if (epoch !== authEpoch) return
+  const identity = await currentIdentity()
+  if (epoch !== authEpoch) return
+  if (identity.accountId !== result.data.accountId || !['ADMIN', 'GUARDIAN'].includes(identity.role)) {
+    throw new Error('登录身份已变化，请刷新后重试。')
+  }
   knownCsrf = readCsrfCookie()
-  state.auth.accountId = result.data.accountId
+  state.auth.accountId = identity.accountId
   state.auth.account = account
   state.auth.authenticated = true
   state.auth.status = 'authenticated'
-  state.auth.role = result.data.role || 'GUARDIAN'
+  state.auth.role = identity.role
   localStorage.setItem('zhiya.account', account)
   localStorage.setItem('zhiya.role', state.auth.role)
   if (state.auth.role === 'ADMIN') {
     state.auth.nickname = account
     navigate('admin/storybooks')
-    await loadAdminContent()
     setToast('已登录内容管理空间')
     return
   }
@@ -728,6 +764,7 @@ async function signOut() {
 }
 
 function selectProfile(profileId) {
+  clearRecommendations()
   state.activeProfileId = Number(profileId)
   localStorage.setItem('zhiya.activeProfileId', String(state.activeProfileId))
   setToast(`已切换到${activeProfile()?.nickname || '孩子的'}阅读空间`)
@@ -751,6 +788,10 @@ async function editProfile(profileId, payload) {
   if (epoch !== authEpoch) return
   await loadProfiles()
   if (epoch !== authEpoch) return
+  if (state.activeProfileId === profileId) {
+    clearRecommendations()
+    void loadRecommendations()
+  }
   setToast('儿童档案已更新')
   return profile
 }
@@ -760,6 +801,7 @@ function applyProfileRemoval(profileId) {
   state.sessions = []
   state.sessionsLoaded = false
   if (!activeProfile()) {
+    clearRecommendations()
     state.activeProfileId = 0
     readingEpoch += 1
     state.sessionLoading = state.sessionBusy = false
@@ -1058,6 +1100,7 @@ function isTemporaryReadFailure(error) {
 async function loadReaderRoute() {
   const epoch = authEpoch
   const generation = ++readingEpoch
+  activeInitialGuidance = null
   const route = { ...state.route }
   const routeHash = location.hash
   const isCurrent = () => epoch === authEpoch && generation === readingEpoch && routeHash === location.hash
@@ -1361,13 +1404,21 @@ function readingRequest(operation) {
 }
 
 async function writeReading(operation) {
-  if (state.sessionBusy) return false
+  const initial = operation.kind === 'guidance' && operation.payload.feedback === 'INITIAL'
+  if (state.sessionBusy || (initial && activeInitialGuidance)) return false
   const epoch = authEpoch
   const generation = readingEpoch
-  state.sessionBusy = true
+  // User writes supersede an automatic prompt. The server arbitrates via expectedRevision.
+  activeInitialGuidance = initial ? operation : null
+  if (!initial) state.sessionBusy = true
+  const isCurrent = () => sameReading(operation, epoch, generation) && (!initial || (
+    activeInitialGuidance === operation && state.currentSession.status === 'IN_PROGRESS'
+    && state.currentSession.currentPage === operation.payload.pageNumber
+    && state.currentSession.revision === operation.payload.expectedRevision
+  ))
   try {
     const result = await readingRequest(operation)
-    if (!sameReading(operation, epoch, generation)) return false
+    if (!isCurrent()) return false
     if (operation.kind === 'finish') {
       state.currentSession = result.session
       state.currentReport = result.report
@@ -1397,7 +1448,7 @@ async function writeReading(operation) {
     state.readingSyncRequired = false
     return true
   } catch (error) {
-    if (!sameReading(operation, epoch, generation)) return false
+    if (!isCurrent()) return false
     const terminalUnknown = error.status === 504 && error.code === 'REQUEST_OUTCOME_UNKNOWN'
     const retrySameKey = error.status === 0 || error.code === 'REQUEST_IN_PROGRESS' || (error.status === 504 && !terminalUnknown)
     pendingReading = retrySameKey ? { ...operation, retryAt: Date.now() + (Number(error.retryAfter) || 1) * 1000 } : null
@@ -1405,7 +1456,7 @@ async function writeReading(operation) {
     if (state.readingSyncRequired) {
       try {
         const detail = await getReadingSession(operation.sessionId)
-        if (!sameReading(operation, epoch, generation)) return false
+        if (!isCurrent()) return false
         applyReadingDetail(detail)
         if (!pendingReading || detail.session.revision !== operation.payload.expectedRevision) {
           pendingReading = null
@@ -1413,7 +1464,7 @@ async function writeReading(operation) {
         }
       } catch {
         // Keep writes disabled until the authoritative session can be read.
-        if (!sameReading(operation, epoch, generation)) return false
+        if (!isCurrent()) return false
       }
     }
     if (terminalUnknown && !state.readingSyncRequired) {
@@ -1423,7 +1474,9 @@ async function writeReading(operation) {
     }
     return false
   } finally {
-    if (sameReading(operation, epoch, generation)) state.sessionBusy = false
+    if (initial) {
+      if (activeInitialGuidance === operation) activeInitialGuidance = null
+    } else if (sameReading(operation, epoch, generation)) state.sessionBusy = false
   }
 }
 
@@ -1623,7 +1676,13 @@ async function handleRoute() {
       replaceRoute('auth')
       return
     }
-    if (!state.admin.storyVersions.length || !state.admin.knowledgeItems.length) await loadAdminContent()
+    if (state.auth.role !== 'ADMIN') {
+      replaceRoute('home')
+      return
+    }
+    if (!(route.section === 'knowledge' ? state.admin.knowledgeLoaded : state.admin.storiesLoaded)) {
+      await loadAdminContent(route.section)
+    }
     return
   }
   if (route.name === 'library') {

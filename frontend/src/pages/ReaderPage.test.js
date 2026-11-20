@@ -544,6 +544,18 @@ describe('guided reading interactions', () => {
     expect(requestGuidance).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps page turning and skipping available while the automatic prompt is pending', async () => {
+    const pending = deferred()
+    const requestGuidance = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(true)
+    render({ events: [], requestGuidance })
+    await flushPromises()
+    expect(button('跳过本页').element.disabled).toBe(false)
+    expect(button('下一页').element.disabled).toBe(false)
+    await button('跳过本页').trigger('click')
+    expect(requestGuidance).toHaveBeenCalledWith('SKIPPED')
+    pending.resolve(false)
+  })
+
   it('restores a saved question and submits understanding feedback for a new prompt', async () => {
     const requestGuidance = vi.fn().mockResolvedValue(true)
     render({ requestGuidance })

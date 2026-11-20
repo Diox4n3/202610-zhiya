@@ -1,9 +1,7 @@
 import { apiRequest } from './client'
 
-export async function listAdminStoryVersions({ page = 1, pageSize = 50, status = '', query = '' } = {}) {
+export async function listAdminStoryVersions({ page = 1, pageSize = 50 } = {}) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
-  if (status) params.set('status', status)
-  if (query) params.set('query', query)
   const result = await apiRequest(`/admin/story-versions?${params}`, { cache: 'no-store' })
   return result.data
 }
@@ -21,7 +19,7 @@ export async function updateAdminStoryStatus(versionId, status) {
   return result.data
 }
 
-export async function listAdminKnowledge({ page = 1, pageSize = 100, status = '', query = '' } = {}) {
+export async function listAdminKnowledge({ page = 1, pageSize = 50, status = '', query = '' } = {}) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
   if (status) params.set('status', status)
   if (query) params.set('query', query)

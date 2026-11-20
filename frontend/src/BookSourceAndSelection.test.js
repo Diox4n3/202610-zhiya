@@ -6,7 +6,7 @@ import { getStoryVersion, listStorybooks } from './api/storybooks'
 import { createReadingSession, getReadingSession } from './api/reading'
 import { previewBooks } from './data/preview'
 
-vi.mock('./api/auth', () => ({ checkHealth: vi.fn() }))
+vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), currentIdentity: async () => ({ role: 'GUARDIAN', accountId: 1 }) }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []) }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
 vi.mock('./api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn() }))

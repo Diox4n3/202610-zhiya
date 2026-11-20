@@ -5,7 +5,7 @@ import { listProfiles } from './api/profiles'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
 import { createReadingSession } from './api/reading'
 
-vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), parentUnlock: vi.fn() }))
+vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), currentIdentity: async () => ({ role: 'GUARDIAN', accountId: 1 }), login: vi.fn(), parentUnlock: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []), deleteProfile: vi.fn() }))
 vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
 vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), deleteReadingSession: vi.fn(), getDeletionStatus: vi.fn(), listReadingSessions: vi.fn(), updateReadingMode: vi.fn() }))

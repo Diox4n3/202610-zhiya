@@ -305,12 +305,8 @@ describe('recommendations and content workspace', () => {
       title: '待发布绘本',
       status: 'DRAFT',
       versionNumber: 1,
-      ageBand: 'AGE_4_5',
-      topics: ['友谊'],
-      licenseNote: '团队自制',
       pages: [{ pageNumber: 1, text: '第一页', imageRef: 'none' }],
-      validationErrors: [],
-      canPublish: true,
+      branches: [],
     }
     const wrapper = render(AdminPage, {
       section: 'storybooks',
@@ -324,8 +320,8 @@ describe('recommendations and content workspace', () => {
     await wrapper.get('input[placeholder="互助，自然观察"]').setValue('自然观察，勇气')
     await wrapper.get('input[placeholder="自制或明确授权依据"]').setValue('团队原创')
     const textareas = wrapper.findAll('textarea')
-    await textareas[0].setValue('小纸船漂进浅湾。\n小芽把它推回水里。')
-    await textareas[1].setValue('none\nnone')
+    await textareas[0].setValue('小纸船漂进浅湾。\n小芽把它推回水里。\n船靠岸了。')
+    await textareas[1].setValue('asset-first\n\nasset-third')
     await wrapper.get('.admin-form').trigger('submit')
     await flushPromises()
     expect(createStoryAction.mock.calls[0][0]).toMatchObject({
@@ -333,7 +329,7 @@ describe('recommendations and content workspace', () => {
       topics: ['自然观察', '勇气'],
       licenseNote: '团队原创',
     })
-    expect(createStoryAction.mock.calls[0][0].pages).toHaveLength(2)
+    expect(createStoryAction.mock.calls[0][0].pages.map(page => page.imageRef)).toEqual(['asset-first', 'none', 'asset-third'])
     await wrapper.findAll('button').find((button) => button.text() === '审核并发布').trigger('click')
     expect(setStoryStatusAction).toHaveBeenCalledWith(201, 'PUBLISHED')
   })

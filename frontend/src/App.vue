@@ -179,6 +179,7 @@ onBeforeUnmount(() => {
       :set-story-status-action="zhiyaActions.adminSetStoryStatus"
       :create-knowledge-action="zhiyaActions.adminCreateKnowledge"
       :update-knowledge-action="zhiyaActions.adminUpdateKnowledge"
+      @sign-out="zhiyaActions.signOut"
       @navigate="zhiyaActions.navigate"
     />
     <HomePage

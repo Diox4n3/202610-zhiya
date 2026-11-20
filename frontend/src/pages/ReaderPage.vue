@@ -34,7 +34,7 @@ const childModeBusy = ref(false)
 const childMinutes = ref(10)
 const childAllowedVersions = ref([])
 const interactionBusy = ref(false)
-const guidanceLoading = ref(false)
+const pendingGuidanceKey = ref('')
 const guidanceError = ref('')
 const autoGuidanceKey = ref('')
 const previewAnswer = ref('')
@@ -60,6 +60,8 @@ const readerPages = computed(() => {
   return props.session.visitedPageNumbers.map(number => byNumber.get(number)).filter(Boolean)
 })
 const currentPage = computed(() => readerPages.value[pageIndex.value] || readerPages.value[0] || null)
+const pageGuidanceKey = computed(() => `${props.session?.readingSessionId}:${currentPage.value?.pageNumber}:${props.session?.revision}`)
+const guidanceLoading = computed(() => pendingGuidanceKey.value === pageGuidanceKey.value)
 const pageEvents = computed(() => (props.events || []).filter((event) => event.pageNumber === currentPage.value?.pageNumber))
 const latestGuidanceEvent = computed(() => pageEvents.value.filter((event) => ['QUESTION', 'FEEDBACK'].includes(event.eventType)).at(-1) || null)
 const currentQuestion = computed(() => pageEvents.value.filter((event) => (
@@ -80,7 +82,7 @@ const nextIndex = computed(() => reviewingHistory.value
   ? pageIndex.value + 1
   : readerPages.value.findIndex(page => page.pageNumber === currentPage.value?.defaultNextPageNumber))
 const rereading = computed(() => currentPage.value?.pageNumber !== props.session?.currentPage)
-const canFinish = computed(() => !props.loading && !turnBusy.value && !interactionBusy.value && !guidanceLoading.value && !props.syncRequired && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
+const canFinish = computed(() => !props.loading && !turnBusy.value && !interactionBusy.value && !props.syncRequired && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
 const mediaAllowed = computed(() => canFinish.value && !rereading.value)
 const canSubmitFeedback = computed(() => mediaAllowed.value && Boolean(currentQuestion.value) && !questionSkipped.value)
 const canSkipQuestion = computed(() => mediaAllowed.value && !questionSkipped.value)
@@ -94,17 +96,20 @@ watch(transcriptEditor, (editor) => editor?.focus(), { flush: 'post' })
 
 async function ensurePageQuestion(force = false) {
   if (!mediaAllowed.value || props.session?.preview || currentQuestion.value || questionSkipped.value || questionBlocked.value) return false
-  const key = `${props.session?.readingSessionId}:${currentPage.value?.pageNumber}:${props.session?.revision}`
+  const key = pageGuidanceKey.value
   if (!force && autoGuidanceKey.value === key) return false
   autoGuidanceKey.value = key
-  guidanceLoading.value = true
+  pendingGuidanceKey.value = key
   guidanceError.value = ''
   try {
     const saved = await props.requestGuidance('INITIAL')
-    if (!saved) guidanceError.value = '本页问题暂时没有生成，可以重试，或先跳过继续阅读。'
+    if (!saved && pageGuidanceKey.value === key && autoGuidanceKey.value === key && !turnBusy.value && !interactionBusy.value
+        && !questionSkipped.value && !currentQuestion.value && !rereading.value) {
+      guidanceError.value = '本页问题暂时没有生成，可以重试，或先跳过继续阅读。'
+    }
     return saved
   } finally {
-    guidanceLoading.value = false
+    if (pendingGuidanceKey.value === key) pendingGuidanceKey.value = ''
   }
 }
 
@@ -539,7 +544,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
             :reviewing-history="reviewingHistory"
             :title="book.title"
             :start-page="pageIndex"
-            :disabled="turnBusy || interactionBusy || guidanceLoading || syncRequired"
+            :disabled="turnBusy || interactionBusy || syncRequired"
             @page-change="onPageChange"
             @error="audioMessage = $event"
           />
@@ -573,7 +578,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
           <div class="question-actions">
             <button class="secondary" type="button" :disabled="!canSubmitFeedback || interactionBusy || guidanceLoading" @click="submitUnderstanding('UNDERSTOOD')">已理解</button>
             <button class="secondary" type="button" :disabled="!canSubmitFeedback || interactionBusy || guidanceLoading" @click="submitUnderstanding('NOT_UNDERSTOOD')">还没懂</button>
-            <button class="secondary" type="button" :disabled="!canSkipQuestion || interactionBusy || guidanceLoading" @click="skipQuestion">跳过本页</button>
+            <button class="secondary" type="button" :disabled="!canSkipQuestion || interactionBusy" @click="skipQuestion">跳过本页</button>
             <button class="primary" type="button" :disabled="!canAnswer || interactionBusy || guidanceLoading" @click="openVoice(true)">输入回答</button>
           </div>
         </section>
