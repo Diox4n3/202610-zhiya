@@ -485,6 +485,78 @@ describe('recommendations and content operations', () => {
   })
 })
 
+describe('admin workspace recovery after failed logout', () => {
+  beforeEach(async () => {
+    auth.login.mockResolvedValueOnce({ data: { accountId: 9 } })
+    auth.currentIdentity.mockResolvedValue({ role: 'ADMIN', accountId: 9 })
+    await actions.signIn('content-admin', 'password123')
+    auth.logout.mockRejectedValueOnce(new ApiError('暂不可用', { status: 503 }))
+  })
+
+  it.each(['storybooks', 'knowledge'])('reloads %s and ignores a stale list response', async (section) => {
+    const knowledge = section === 'knowledge'
+    const list = knowledge ? adminApi.listAdminKnowledge : adminApi.listAdminStoryVersions
+    const pending = deferred()
+    list.mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ items: [{ title: '当前结果' }] })
+    window.history.replaceState({}, '', '/#admin/' + section)
+    const firstLoad = actions.syncRoute()
+    expect(await actions.signOut()).toBe(false)
+    expect(auth.currentIdentity).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenCalledTimes(2)
+    pending.resolve({ items: [{ title: '旧请求结果' }] })
+    await firstLoad
+    expect(state.admin[knowledge ? 'loading' : 'storiesLoading']).toBe(false)
+    expect(state.admin[knowledge ? 'knowledgeItems' : 'storyVersions']).toEqual([{ title: '当前结果' }])
+    expect(await actions.loadAdminContent(section)).toBe(true)
+  })
+
+  it('reads the committed publication after the in-flight write settles without repeating it', async () => {
+    await actions.syncRoute()
+    adminApi.listAdminStoryVersions.mockClear()
+    const pending = deferred()
+    adminApi.updateAdminStoryStatus.mockReturnValueOnce(pending.promise)
+    const publishing = actions.adminSetStoryStatus(302, 'PUBLISHED')
+    const recovery = actions.signOut()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(adminApi.listAdminStoryVersions).not.toHaveBeenCalled()
+    const published = { storybookId: 201, storyVersionId: 302, status: 'PUBLISHED' }
+    adminApi.listAdminStoryVersions.mockResolvedValueOnce({ items: [published] })
+    pending.resolve(published)
+    await publishing
+    expect(await recovery).toBe(false)
+    expect(state.admin.busy).toBe(false)
+    expect(state.admin.storyVersions).toEqual([published])
+    expect(adminApi.updateAdminStoryStatus).toHaveBeenCalledTimes(1)
+    expect(adminApi.listAdminStoryVersions).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps old lists and writes inaccessible while identity is unavailable, then recovers on retry', async () => {
+    adminApi.listAdminStoryVersions.mockResolvedValueOnce({ items: [{ title: '退出前的数据' }] })
+    await actions.syncRoute()
+    auth.currentIdentity.mockRejectedValueOnce(new ApiError('无法确认会话', { status: 503 }))
+    expect(await actions.signOut()).toBe(false)
+    expect(state.auth.status).toBe('unavailable')
+    expect(state.admin.storyVersions).toEqual([])
+    expect(await actions.adminSetStoryStatus(302, 'PUBLISHED')).toBe(false)
+    expect(adminApi.updateAdminStoryStatus).not.toHaveBeenCalled()
+    expect(state.toast.message).toContain('重新确认身份')
+    adminApi.listAdminStoryVersions.mockResolvedValueOnce({ items: [{ title: '已核实的列表' }] })
+    await actions.refreshIdentity()
+    expect(state.auth.role).toBe('ADMIN')
+    expect(state.admin.storyVersions).toEqual([{ title: '已核实的列表' }])
+  })
+
+  it('keeps the workspace closed when the identity check confirms the session has ended', async () => {
+    await actions.syncRoute()
+    adminApi.listAdminStoryVersions.mockClear()
+    auth.currentIdentity.mockRejectedValueOnce(new ApiError('登录已失效', { status: 401 }))
+    expect(await actions.signOut()).toBe(true)
+    expect(state.auth.authenticated).toBe(false)
+    expect(state.admin.storyVersions).toEqual([])
+    expect(adminApi.listAdminStoryVersions).not.toHaveBeenCalled()
+  })
+})
+
 describe('account isolation and logout', () => {
   it('does not carry a guardian’s preview selection across logout or the next login', async () => {
     books.listStorybooks.mockResolvedValue([])

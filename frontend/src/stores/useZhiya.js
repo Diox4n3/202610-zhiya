@@ -129,6 +129,7 @@ let recommendationRequest = 0
 let readingEpoch = 0
 let pendingReading = null
 let activeInitialGuidance = null
+let pendingAdminWrite = null
 
 function clearAccountViews() {
   clearTimeout(toastTimer)
@@ -145,6 +146,7 @@ function clearAccountViews() {
   state.recommendationTopic = ''
   state.recommendationsLoading = false
   state.recommendationsError = ''
+  pendingAdminWrite = null
   state.admin.storyVersions = []
   state.admin.knowledgeItems = []
   state.admin.storiesLoaded = false
@@ -409,13 +411,26 @@ async function loadRecommendations(topic = state.recommendationTopic) {
   }
 }
 
+function hasAdminSession() {
+  return state.auth.status === 'authenticated' && state.auth.authenticated && state.auth.role === 'ADMIN'
+}
+
+async function trackAdminWrite(request) {
+  pendingAdminWrite = request
+  try {
+    return await request
+  } finally {
+    if (pendingAdminWrite === request) pendingAdminWrite = null
+  }
+}
+
 async function loadAdminContent(section = state.route.section) {
   const knowledge = section === 'knowledge'
   const loading = knowledge ? 'loading' : 'storiesLoading'
   const loaded = knowledge ? 'knowledgeLoaded' : 'storiesLoaded'
   const errorField = knowledge ? 'knowledgeError' : 'error'
   const list = knowledge ? listAdminKnowledge : listAdminStoryVersions
-  if (!state.auth.authenticated || state.auth.role !== 'ADMIN' || state.admin[loading]) return false
+  if (!hasAdminSession() || state.admin[loading]) return false
   const epoch = authEpoch
   state.admin[loading] = true
   state.admin[errorField] = ''
@@ -441,12 +456,12 @@ async function loadAdminContent(section = state.route.section) {
 }
 
 async function adminCreateStory(payload) {
-  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
+  if (state.admin.busy || !hasAdminSession()) return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.error = ''
   try {
-    const story = await createAdminStory(payload)
+    const story = await trackAdminWrite(createAdminStory(payload))
     if (epoch !== authEpoch) return false
     state.admin.storyVersions = [story, ...state.admin.storyVersions]
     setToast('绘本草稿已创建')
@@ -463,12 +478,12 @@ async function adminCreateStory(payload) {
 }
 
 async function adminSetStoryStatus(versionId, status) {
-  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
+  if (state.admin.busy || !hasAdminSession()) return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.error = ''
   try {
-    const story = await updateAdminStoryStatus(versionId, status)
+    const story = await trackAdminWrite(updateAdminStoryStatus(versionId, status))
     if (epoch !== authEpoch) return false
     const published = story.status === 'PUBLISHED'
     state.admin.storyVersions = state.admin.storyVersions.map((item) => {
@@ -497,12 +512,12 @@ async function adminSetStoryStatus(versionId, status) {
 }
 
 async function adminCreateKnowledge(payload) {
-  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
+  if (state.admin.busy || !hasAdminSession()) return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.knowledgeError = ''
   try {
-    const item = await createAdminKnowledge(payload)
+    const item = await trackAdminWrite(createAdminKnowledge(payload))
     if (epoch !== authEpoch) return false
     state.admin.knowledgeItems = [item, ...state.admin.knowledgeItems]
     setToast(item.status === 'APPROVED' ? '知识条目已创建并审核' : '知识草稿已创建')
@@ -519,12 +534,12 @@ async function adminCreateKnowledge(payload) {
 }
 
 async function adminUpdateKnowledge(knowledgeId, payload) {
-  if (state.admin.busy || !state.auth.authenticated || state.auth.role !== 'ADMIN') return false
+  if (state.admin.busy || !hasAdminSession()) return false
   const epoch = authEpoch
   state.admin.busy = true
   state.admin.knowledgeError = ''
   try {
-    const item = await updateAdminKnowledge(knowledgeId, payload)
+    const item = await trackAdminWrite(updateAdminKnowledge(knowledgeId, payload))
     if (epoch !== authEpoch) return false
     await loadAdminContent('knowledge')
     if (epoch !== authEpoch) return false
@@ -760,9 +775,24 @@ async function signOut() {
   } catch (error) {
     if (epoch !== authEpoch) return false
     if (error.status !== 401) {
-      state.auth.status = 'authenticated'
-      state.sessionBusy = false
-      state.readingSyncRequired = Boolean(state.currentSession && !state.currentSession.preview)
+      if (state.auth.role === 'ADMIN') {
+        // Read the catalogue after any already-sent mutation settles. Never replay the mutation.
+        if (pendingAdminWrite) await Promise.allSettled([pendingAdminWrite])
+        if (epoch !== authEpoch) return false
+        clearAccountViews()
+        state.auth = { ...state.auth, status: 'checking', authenticated: false, role: null, accountId: null }
+        await refreshIdentity()
+        if (state.auth.status === 'anonymous') return true
+        if (epoch !== authEpoch) return false
+        if (state.auth.status === 'unavailable') {
+          setToast('退出尚未确认。请在网络恢复后重新确认身份。', 'error')
+          return false
+        }
+      } else {
+        state.auth.status = 'authenticated'
+        state.sessionBusy = false
+        state.readingSyncRequired = Boolean(state.currentSession && !state.currentSession.preview)
+      }
       setToast('退出尚未确认，服务器会话可能仍有效。请检查网络后重试退出。', 'error')
       return false
     }
