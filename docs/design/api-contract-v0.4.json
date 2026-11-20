@@ -1100,7 +1100,7 @@
     {
       "method": "DELETE",
       "path": "/api/v1/auth/sessions/current",
-      "permission": "家长或当前受限儿童",
+      "permission": "家长、当前受限儿童或内容管理员",
       "ownerRole": "业务后端",
       "requestContentType": null,
       "queryExample": null,

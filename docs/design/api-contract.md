@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | API-001 | POST /api/v1/auth/registrations | 匿名 |
 | API-002 | POST /api/v1/auth/sessions | 匿名 |
-| API-003 | DELETE /api/v1/auth/sessions/current | 家长或当前受限儿童 |
+| API-003 | DELETE /api/v1/auth/sessions/current | 家长、当前受限儿童或内容管理员 |
 | API-004 | GET /api/v1/child-profiles | 已认证家长且归本人 |
 | API-005 | POST /api/v1/child-profiles | 已认证家长 |
 | API-006 | PATCH /api/v1/child-profiles/{profile_id} | 已认证家长且归本人 |
