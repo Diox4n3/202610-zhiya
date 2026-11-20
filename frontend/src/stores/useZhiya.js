@@ -23,6 +23,7 @@ import {
   requestReadingGuidance,
   updateReadingMode,
 } from '../api/reading'
+import { approveStoryVersion, generateStory } from '../api/storyWorkshop'
 import { previewBooks, mapApiBook } from '../data/preview'
 import { countReadPages } from '../data/readingProgress'
 
@@ -41,6 +42,12 @@ function parseRoute(hash = location.hash) {
   }
   if (name === 'reader' && parts[1] === 'preview') return { name, previewVersionId: Number(parts[2]) || null }
   if (name === 'reader') return { name, sessionId: Number(parts[1]) || null }
+  if (name === 'workshop') {
+    return {
+      name,
+      sourceSessionId: parts[1] === 'continue' ? Number(parts[2]) || null : null,
+    }
+  }
   if (['library', 'auth'].includes(name)) return { name }
   return { name: 'home' }
 }
@@ -51,6 +58,23 @@ function savedProfileId() {
 }
 
 const savedNickname = localStorage.getItem('zhiya.guardianNickname') || '知芽家长'
+
+function emptyWorkshopState() {
+  return {
+    draft: null,
+    generationStatus: 'idle',
+    generationError: '',
+    pendingGeneration: null,
+    approvalBusy: false,
+    approvedVersion: null,
+    continuation: null,
+    continuationLoading: false,
+    continuationError: '',
+    switchPending: null,
+    switchBusy: false,
+    switchError: '',
+  }
+}
 
 const state = reactive({
   route: parseRoute(),
@@ -109,6 +133,7 @@ const state = reactive({
     busy: false,
     error: '',
   },
+  workshop: emptyWorkshopState(),
   toast: { message: '', tone: 'info', visible: false },
 })
 
@@ -130,6 +155,7 @@ let readingEpoch = 0
 let pendingReading = null
 let activeInitialGuidance = null
 let pendingAdminWrite = null
+let workshopRequest = 0
 
 function clearAccountViews() {
   clearTimeout(toastTimer)
@@ -147,6 +173,8 @@ function clearAccountViews() {
   state.recommendationsLoading = false
   state.recommendationsError = ''
   pendingAdminWrite = null
+  workshopRequest += 1
+  state.workshop = emptyWorkshopState()
   state.admin.storyVersions = []
   state.admin.knowledgeItems = []
   state.admin.storiesLoaded = false
@@ -556,6 +584,279 @@ async function adminUpdateKnowledge(knowledgeId, payload) {
   }
 }
 
+function hasGuardianSession() {
+  return state.auth.status === 'authenticated'
+    && state.auth.authenticated
+    && state.auth.role === 'GUARDIAN'
+}
+
+function workshopPayload(form) {
+  const topic = String(form?.topic || '').trim()
+  const scene = String(form?.scene || '').trim()
+  const characters = [...new Set((form?.characters || []).map((item) => String(item).trim()).filter(Boolean))]
+  if (!topic || !scene || !characters.length) return { error: '请完整选择主题、角色和场景。' }
+  if (topic.length > 120 || scene.length > 120 || characters.some((item) => item.length > 120)) {
+    return { error: '故事条件每项不能超过 120 个字符。' }
+  }
+  if (characters.length > 8) return { error: '最多同时使用 8 个角色。' }
+  const continuation = state.workshop.continuation
+  if (!continuation && !['AGE_3_4', 'AGE_4_5', 'AGE_5_6'].includes(form?.ageBand)) {
+    return { error: '请选择适读年龄段。' }
+  }
+  if (continuation && (
+    continuation.session.status !== 'IN_PROGRESS'
+    || continuation.session.mode !== 'PARENT_CHILD'
+  )) {
+    return { error: '当前阅读会话已不能继续创作。' }
+  }
+  return {
+    payload: {
+      ...(continuation
+        ? {
+            sourceReadingSessionId: continuation.session.readingSessionId,
+            expectedRevision: continuation.session.revision,
+          }
+        : { ageBand: form.ageBand }),
+      topic,
+      characters,
+      scene,
+      branching: Boolean(form?.branching),
+      clientRequestId: createClientEventId('story'),
+    },
+  }
+}
+
+async function runWorkshopGeneration(payload, checking = false) {
+  if (!hasGuardianSession()) {
+    setToast('请先登录家长账号。', 'error')
+    return false
+  }
+  if (state.workshop.generationStatus === 'running') return false
+  const epoch = authEpoch
+  const request = ++workshopRequest
+  state.workshop.pendingGeneration = payload
+  state.workshop.generationStatus = checking ? 'checking' : 'running'
+  state.workshop.generationError = ''
+  try {
+    const draft = await generateStory(payload)
+    if (epoch !== authEpoch || request !== workshopRequest) return false
+    state.workshop.draft = draft
+    state.workshop.approvedVersion = null
+    state.workshop.generationStatus = 'review'
+    state.workshop.pendingGeneration = null
+    setToast('草稿已生成，等待你逐页审核')
+    return true
+  } catch (error) {
+    if (epoch !== authEpoch || request !== workshopRequest) return false
+    const unresolved = error.code === 'REQUEST_IN_PROGRESS'
+      || error.code === 'REQUEST_OUTCOME_UNKNOWN'
+      || error.status === 504
+    state.workshop.generationStatus = unresolved ? 'unknown' : 'failed'
+    state.workshop.generationError = `${describeApiError(error)}${
+      unresolved ? ' 可稍后使用同一请求确认生成结果。' : ''
+    }`
+    if (!unresolved) state.workshop.pendingGeneration = null
+    setToast(state.workshop.generationError, 'error')
+    return false
+  }
+}
+
+async function generateWorkshopDraft(form) {
+  if (['running', 'checking'].includes(state.workshop.generationStatus)) return false
+  if (['review', 'approved'].includes(state.workshop.generationStatus) && state.workshop.draft) return false
+  if (state.workshop.generationStatus === 'unknown' && state.workshop.pendingGeneration) {
+    return retryWorkshopGeneration()
+  }
+  const result = workshopPayload(form)
+  if (result.error) {
+    state.workshop.generationError = result.error
+    return false
+  }
+  return runWorkshopGeneration(result.payload)
+}
+
+async function retryWorkshopGeneration() {
+  const request = state.workshop.pendingGeneration
+  if (!request) {
+    state.workshop.generationError = '没有可确认的生成请求，请重新填写条件。'
+    return false
+  }
+  return runWorkshopGeneration(request, true)
+}
+
+function resetWorkshopDraft() {
+  if (['running', 'checking'].includes(state.workshop.generationStatus)) return false
+  state.workshop.draft = null
+  state.workshop.approvedVersion = null
+  state.workshop.generationStatus = 'idle'
+  state.workshop.generationError = ''
+  state.workshop.pendingGeneration = null
+  state.workshop.switchPending = null
+  state.workshop.switchError = ''
+  return true
+}
+
+async function loadWorkshopContinuation(sessionId) {
+  if (!sessionId || !hasGuardianSession()) return false
+  const epoch = authEpoch
+  const request = ++workshopRequest
+  state.workshop = {
+    ...emptyWorkshopState(),
+    continuationLoading: true,
+  }
+  try {
+    const detail = await getReadingSession(sessionId)
+    if (epoch !== authEpoch || request !== workshopRequest) return false
+    const version = await getStoryVersion(detail.session.storyVersionId)
+    if (epoch !== authEpoch || request !== workshopRequest) return false
+    if (detail.session.status !== 'IN_PROGRESS' || detail.session.mode !== 'PARENT_CHILD') {
+      throw new Error('只有进行中的亲子共读会话可以续写。')
+    }
+    if (!['APPROVED_PRIVATE', 'RETIRED'].includes(version.status)) {
+      throw new Error('只有家长审核过的私人原创绘本可以续写。')
+    }
+    state.workshop.continuation = {
+      session: detail.session,
+      version,
+      resumePageNumber: (detail.session.visitedPageNumbers || []).length + 1,
+    }
+    return true
+  } catch (error) {
+    if (epoch === authEpoch && request === workshopRequest) {
+      state.workshop.continuationError = error instanceof ApiError ? describeApiError(error) : error.message
+      setToast(state.workshop.continuationError, 'error')
+    }
+    return false
+  } finally {
+    if (epoch === authEpoch && request === workshopRequest) state.workshop.continuationLoading = false
+  }
+}
+
+function installApprovedWorkshopVersion(version) {
+  state.workshop.draft = version
+  state.workshop.approvedVersion = version
+  state.workshop.generationStatus = 'approved'
+  state.workshop.generationError = ''
+  state.workshop.pendingGeneration = null
+}
+
+async function recoverApprovedWorkshopVersion(versionId) {
+  try {
+    const version = await getStoryVersion(versionId)
+    if (version?.status !== 'APPROVED_PRIVATE') return null
+    installApprovedWorkshopVersion(version)
+    return version
+  } catch {
+    return null
+  }
+}
+
+async function approveWorkshopDraft() {
+  const draft = state.workshop.draft
+  if (!draft || draft.status !== 'PENDING_REVIEW' || state.workshop.approvalBusy) return false
+  const epoch = authEpoch
+  state.workshop.approvalBusy = true
+  state.workshop.generationError = ''
+  try {
+    const approved = await approveStoryVersion(draft.storyVersionId, draft.versionNumber)
+    if (epoch !== authEpoch) return false
+    installApprovedWorkshopVersion(approved)
+    setToast('审核完成，绘本已进入你的私人书架')
+    return true
+  } catch (error) {
+    if (epoch !== authEpoch) return false
+    if (error.code === 'REQUEST_OUTCOME_UNKNOWN' || error.status === 409 || error.status === 504) {
+      const recovered = await recoverApprovedWorkshopVersion(draft.storyVersionId)
+      if (epoch !== authEpoch) return false
+      if (recovered) {
+        setToast('审核结果已确认，绘本已进入你的私人书架')
+        return true
+      }
+    }
+    state.workshop.generationError = describeApiError(error)
+    setToast(state.workshop.generationError, 'error')
+    return false
+  } finally {
+    if (epoch === authEpoch) state.workshop.approvalBusy = false
+  }
+}
+
+async function openApprovedPrivateShelf() {
+  const version = state.workshop.approvedVersion
+  if (!version) return false
+  await loadBooks({ ageBand: '', topic: '' })
+  const id = `version-${version.storyVersionId}`
+  if (!state.books.some((book) => book.id === id)) {
+    const approvedBook = mapApiBook({
+      ...version,
+      ageBand: activeProfile()?.ageBand || '',
+      topics: state.workshop.draft?.topics || [],
+    })
+    state.books = [approvedBook, ...state.books.filter((book) => book.id !== id)]
+    state.booksSource = 'api'
+  }
+  selectBook(id)
+  navigate('library')
+  return true
+}
+
+async function switchWorkshopContinuation() {
+  const target = state.workshop.approvedVersion
+  const continuation = state.workshop.continuation
+  const profile = activeProfile()
+  if (target?.continuation && continuation?.session && state.workshop.switchBusy) return false
+  if (!target?.continuation || !continuation?.session) {
+    state.workshop.switchError = '当前版本不含可切换的续写快照。'
+    return false
+  }
+  if (!profile) {
+    state.workshop.switchError = '请选择与本次阅读相同的儿童档案后再继续。'
+    return false
+  }
+  const payload = state.workshop.switchPending || {
+    childProfileId: profile.childProfileId,
+    storyVersionId: target.storyVersionId,
+    mode: 'PARENT_CHILD',
+    sourceReadingSessionId: continuation.session.readingSessionId,
+    expectedRevision: target.continuation.sourceRevision,
+    clientRequestId: createClientEventId('switch'),
+  }
+  const epoch = authEpoch
+  state.workshop.switchPending = payload
+  state.workshop.switchBusy = true
+  state.workshop.switchError = ''
+  try {
+    const session = await createReadingSession(payload)
+    if (epoch !== authEpoch) return false
+    state.workshop.switchPending = null
+    state.currentSession = session
+    state.currentBook = mapApiBook(target)
+    state.currentEvents = []
+    state.currentReport = null
+    navigate(`reader/${session.readingSessionId}`)
+    setToast(`已从第 ${session.currentPage} 页继续阅读`)
+    void loadSessions()
+    return true
+  } catch (error) {
+    if (epoch !== authEpoch) return false
+    const unresolved = error.code === 'REQUEST_IN_PROGRESS'
+      || error.code === 'REQUEST_OUTCOME_UNKNOWN'
+      || error.status === 504
+    if (!unresolved) state.workshop.switchPending = null
+    if (error.code === 'CONTINUATION_STALE') {
+      await loadWorkshopContinuation(continuation.session.readingSessionId)
+      if (epoch !== authEpoch) return false
+    }
+    state.workshop.switchError = `${describeApiError(error)}${
+      unresolved ? ' 可稍后确认原切换请求的结果。' : ''
+    }`
+    setToast(state.workshop.switchError, 'error')
+    return false
+  } finally {
+    if (epoch === authEpoch) state.workshop.switchBusy = false
+  }
+}
+
 function refreshShelfAfterNotFound() {
   state.pendingBookRestore = shelfRestoreTarget()
   state.nextBooksPage = 1
@@ -756,6 +1057,10 @@ async function signIn(account, password) {
   await loadRecommendations()
   if (epoch !== authEpoch) return
   setToast('已登录知芽家长空间')
+  if (state.route.name === 'workshop') {
+    navigate(state.route.sourceSessionId ? `workshop/continue/${state.route.sourceSessionId}` : 'workshop')
+    return
+  }
   navigate(state.books.length ? 'library' : 'account/children')
 }
 
@@ -1713,6 +2018,22 @@ async function handleRoute() {
   }
 
   const route = state.route
+  if (route.name === 'workshop') {
+    if (!state.auth.authenticated) return
+    if (state.auth.role !== 'GUARDIAN') {
+      replaceRoute('admin/storybooks')
+      return
+    }
+    if (!route.sourceSessionId && (state.workshop.continuation || state.workshop.continuationLoading)) {
+      workshopRequest += 1
+      state.workshop = emptyWorkshopState()
+    }
+    if (route.sourceSessionId
+        && state.workshop.continuation?.session.readingSessionId !== route.sourceSessionId) {
+      await loadWorkshopContinuation(route.sourceSessionId)
+    }
+    return
+  }
   if (route.name === 'admin') {
     if (!state.auth.authenticated) {
       replaceRoute('auth')
@@ -1783,6 +2104,13 @@ export const zhiyaActions = {
   adminSetStoryStatus,
   adminCreateKnowledge,
   adminUpdateKnowledge,
+  generateWorkshopDraft,
+  retryWorkshopGeneration,
+  resetWorkshopDraft,
+  loadWorkshopContinuation,
+  approveWorkshopDraft,
+  openApprovedPrivateShelf,
+  switchWorkshopContinuation,
   selectBook,
   openDetail,
   loadDetail,
