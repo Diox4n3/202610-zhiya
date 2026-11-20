@@ -217,7 +217,8 @@ async function saveRevision() {
             <div><span class="pill">{{ item.status }}</span><h2>{{ item.title }}</h2></div>
             <small>{{ item.itemKey }} · v{{ item.versionNumber }}</small>
           </div>
-          <p>{{ item.sourceTitle }} · {{ item.locator }} · {{ item.ageBand || '全龄' }}</p>
+          <p>{{ item.sourceTitle }} · {{ item.ageBand || '全龄' }}</p>
+          <p>来源定位：{{ item.sourceReference }}<span v-if="item.locator"> · {{ item.locator }}</span></p>
           <p class="admin-content">{{ item.content }}</p>
           <div class="admin-card-actions">
             <button v-if="item.status === 'DRAFT'" class="primary" type="button" :disabled="sectionLoading || admin.busy" @click="updateKnowledgeAction(item.knowledgeItemId, { status: 'APPROVED' })">审核通过</button>

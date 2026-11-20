@@ -53,10 +53,12 @@ let audio = null
 let audioGeneration = 0
 let speechRequest = null
 
+const browsingVisits = ref(false)
 const reviewingHistory = computed(() => ['FINISHED', 'INTERRUPTED'].includes(props.session?.status) && props.session.visitedPageNumbers.length > 0)
+const showingVisits = computed(() => reviewingHistory.value || browsingVisits.value)
 const readerPages = computed(() => {
   const pages = props.book?.pages || []
-  if (!reviewingHistory.value) return pages
+  if (!showingVisits.value || !props.session) return pages
   const byNumber = new Map(pages.map(page => [page.pageNumber, page]))
   return props.session.visitedPageNumbers.map(number => byNumber.get(number)).filter(Boolean)
 })
@@ -79,10 +81,10 @@ const currentBranches = computed(() => (props.book?.branches || []).filter((bran
   branch.fromPageNumber === currentPage.value?.pageNumber && branch.reviewStatus === 'APPROVED'
 )))
 const isLast = computed(() => currentPage.value?.defaultNextPageNumber == null && !currentBranches.value.length)
-const nextIndex = computed(() => reviewingHistory.value
+const nextIndex = computed(() => showingVisits.value
   ? pageIndex.value + 1
   : readerPages.value.findIndex(page => page.pageNumber === currentPage.value?.defaultNextPageNumber))
-const rereading = computed(() => currentPage.value?.pageNumber !== props.session?.currentPage)
+const rereading = computed(() => browsingVisits.value || currentPage.value?.pageNumber !== props.session?.currentPage)
 const canFinish = computed(() => !props.loading && !turnBusy.value && !interactionBusy.value && !props.syncRequired && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
 const mediaAllowed = computed(() => canFinish.value && !rereading.value)
 const canSubmitFeedback = computed(() => mediaAllowed.value && Boolean(currentQuestion.value) && !questionSkipped.value && !questionBlocked.value)
@@ -148,10 +150,21 @@ watch(
   [() => props.session?.readingSessionId, () => props.session?.currentPage, () => props.book, reviewingHistory],
   ([id, current, book, reviewing], [previousId, , , wasReviewing]) => {
     const justFinished = reviewing && !wasReviewing && id === previousId
-    showPage(justFinished ? book?.pages[pageIndex.value]?.pageNumber : current)
+    const keepVisit = justFinished && browsingVisits.value
+    browsingVisits.value = false
+    if (keepVisit) showIndex(pageIndex.value)
+    else showPage(justFinished ? book?.pages[pageIndex.value]?.pageNumber : current)
   },
   { immediate: true },
 )
+
+function showVisit(index) {
+  const visits = props.session.visitedPageNumbers
+  if (index < 0 || index >= visits.length) return
+  browsingVisits.value = !reviewingHistory.value && index < visits.length - 1
+  if (showingVisits.value) showIndex(index)
+  else showPage(props.session.currentPage)
+}
 
 async function onPageChange({ storyIndex }) {
   const target = readerPages.value[storyIndex]
@@ -162,11 +175,17 @@ async function onPageChange({ storyIndex }) {
   if (storyIndex === pageIndex.value) return
   stopNarration()
   closeVoice()
-  if (reviewingHistory.value || props.session.visitedPageNumbers.includes(target.pageNumber)) {
-    showIndex(storyIndex)
+  if (showingVisits.value) {
+    showVisit(storyIndex)
     return
   }
+  const visits = props.session.visitedPageNumbers
   const serverPage = props.book.pages.find((page) => page.pageNumber === props.session.currentPage)
+  if (target.pageNumber !== serverPage?.defaultNextPageNumber && visits.length > 1) {
+    if (storyIndex === pageIndex.value - 1) return showVisit(visits.length - 2)
+    const previousVisit = visits.lastIndexOf(target.pageNumber)
+    if (previousVisit >= 0) return showVisit(previousVisit)
+  }
   if (target.pageNumber !== serverPage?.defaultNextPageNumber || props.session.status !== 'IN_PROGRESS') {
     flipBook.value?.showPage(pageIndex.value)
     return
@@ -185,10 +204,10 @@ async function onPageChange({ storyIndex }) {
 }
 
 function goPrevious() {
-  if (reviewingHistory.value) return onPageChange({ storyIndex: pageIndex.value - 1 })
-  const visited = props.session.visitedPageNumbers
-  const index = visited.indexOf(currentPage.value?.pageNumber)
-  if (index > 0) onPageChange({ storyIndex: props.book.pages.findIndex((page) => page.pageNumber === visited[index - 1]) })
+  if (showingVisits.value) return onPageChange({ storyIndex: pageIndex.value - 1 })
+  stopNarration()
+  closeVoice()
+  showVisit(props.session.visitedPageNumbers.length - 2)
 }
 
 function goNext() {
@@ -558,10 +577,10 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
         <div class="flipbook-stage">
           <FlipBook
             ref="flipBook"
-            :key="`${session.readingSessionId}-${reviewingHistory}`"
+            :key="`${session.readingSessionId}-${showingVisits}`"
             :pages="readerPages"
             :page-count="book.pageCount"
-            :reviewing-history="reviewingHistory"
+            :reviewing-history="showingVisits"
             :title="book.title"
             :start-page="pageIndex"
             :disabled="turnBusy || interactionBusy || syncRequired"
@@ -571,7 +590,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
           <p class="flip-hint">拖动书页边缘，或点击外侧翻页</p>
         </div>
         <nav class="reader-dock" aria-label="阅读控制">
-          <button class="dock-button" type="button" :disabled="pageIndex === 0 || turnBusy || interactionBusy || syncRequired" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
+          <button class="dock-button" type="button" :disabled="(showingVisits ? pageIndex === 0 : session.visitedPageNumbers.length < 2) || turnBusy || interactionBusy || syncRequired" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
           <button class="dock-button" type="button" :disabled="!mediaAllowed" @click="playNarration"><span class="dock-glyph">{{ audioStatus === 'playing' ? 'Ⅱ' : '▶' }}</span>{{ audioStatus === 'playing' ? '暂停朗读' : audioStatus === 'loading' ? '取消朗读' : '朗读' }}</button>
           <button class="dock-button primary" type="button" :disabled="!canAnswer" @click="openVoice()"><span class="dock-glyph">芽</span>语音识别</button>
           <button v-if="isLast && !readerPages[nextIndex]" class="dock-button" type="button" :disabled="!canFinish" @click="finishReading"><span class="dock-glyph">✓</span>完成</button>

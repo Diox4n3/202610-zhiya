@@ -470,9 +470,19 @@ async function adminSetStoryStatus(versionId, status) {
   try {
     const story = await updateAdminStoryStatus(versionId, status)
     if (epoch !== authEpoch) return false
-    state.admin.storyVersions = state.admin.storyVersions.map((item) => (
-      item.storyVersionId === versionId ? story : item
-    ))
+    const published = story.status === 'PUBLISHED'
+    state.admin.storyVersions = state.admin.storyVersions.map((item) => {
+      if (item.storyVersionId === versionId) return { ...item, ...story }
+      if (published && item.storybookId === story.storybookId && item.status === 'PUBLISHED') {
+        return { ...item, status: 'RETIRED' }
+      }
+      return item
+    })
+    if (published) {
+      state.admin.storiesLoaded = false
+      await loadAdminContent('storybooks')
+      if (epoch !== authEpoch) return false
+    }
     setToast(status === 'PUBLISHED' ? '绘本已发布' : '绘本已撤回')
     return true
   } catch (error) {
@@ -1442,7 +1452,7 @@ async function writeReading(operation) {
     } else {
       const session = state.currentSession
       session.currentPage = operation.payload.pageNumber
-      session.visitedPageNumbers = [...new Set([...session.visitedPageNumbers, operation.payload.pageNumber])]
+      session.visitedPageNumbers = [...session.visitedPageNumbers, operation.payload.pageNumber]
       session.status = 'IN_PROGRESS'
       session.revision = result.revision
     }
@@ -1524,7 +1534,7 @@ async function recordPageChange(pageNumber) {
   if (pageNumber !== currentPage?.defaultNextPageNumber) return false
   if (session.preview) {
     session.currentPage = pageNumber
-    session.visitedPageNumbers = [...new Set([...session.visitedPageNumbers, pageNumber])]
+    session.visitedPageNumbers = [...session.visitedPageNumbers, pageNumber]
     session.revision += 1
     return true
   }

@@ -349,6 +349,19 @@ describe('recommendations and content workspace', () => {
     expect(setStoryStatusAction).toHaveBeenCalledWith(201, 'PUBLISHED')
   })
 
+  it.each([undefined, '第 2 节'])('shows the full source reference before a reviewer approves, locator %s', async (locator) => {
+    const item = { knowledgeItemId: 806, status: 'DRAFT', title: '示例条目', content: '观察画面',
+      sourceTitle: '阅读资料', sourceReference: '文献编号 A-17（2025 年版）', locator }
+    const updateKnowledgeAction = vi.fn()
+    const wrapper = render(AdminPage, { section: 'knowledge', admin: { knowledgeItems: [item] },
+      createStoryAction: vi.fn(), setStoryStatusAction: vi.fn(), createKnowledgeAction: vi.fn(), updateKnowledgeAction })
+    const card = wrapper.get('.admin-card')
+    expect(card.text()).toContain(item.sourceReference)
+    if (locator) expect(card.text()).toContain(locator)
+    await card.findAll('button').find(button => button.text() === '审核通过').trigger('click')
+    expect(updateKnowledgeAction).toHaveBeenCalledWith(806, { status: 'APPROVED' })
+  })
+
   it('creates a knowledge revision instead of editing the historical row', async () => {
     const updateKnowledgeAction = vi.fn().mockResolvedValue(true)
     const item = {

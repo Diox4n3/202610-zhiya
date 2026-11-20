@@ -135,6 +135,13 @@ describe('authoritative reading progress', () => {
     expect(state.currentSession.currentPage).toBe(7)
   })
 
+  it('preserves repeated visits when a new page change follows a branch back', async () => {
+    reading.getReadingSession.mockResolvedValueOnce(detail({ currentPage: 1, visitedPageNumbers: [1, 3, 1] }))
+    await actions.loadReaderRoute()
+    expect(await actions.recordPageChange(3)).toBe(true)
+    expect(state.currentSession.visitedPageNumbers).toEqual([1, 3, 1, 3])
+  })
+
   it('resynchronizes all session details after a 409 and uses the new revision', async () => {
     reading.addReadingEvent.mockRejectedValueOnce(new ApiError('changed', { status: 409, code: 'SESSION_CONFLICT' }))
     reading.getReadingSession.mockResolvedValueOnce(detail({ currentPage: 3, visitedPageNumbers: [1, 3], revision: 5 }))
@@ -418,6 +425,34 @@ describe('recommendations and content operations', () => {
     expect(await loading).toBe(false)
     expect(state.recommendations).toEqual([])
     expect(state.recommendationsLoading).toBe(false)
+  })
+
+  it.each([true, false])('retires the old publication after publish (catalogue refresh succeeds: %s)', async (refreshSucceeds) => {
+    auth.login.mockResolvedValueOnce({ data: { accountId: 9 } })
+    auth.currentIdentity.mockResolvedValue({ role: 'ADMIN', accountId: 9 })
+    await actions.signIn('content-admin', 'password123')
+    const old = { storybookId: 201, storyVersionId: 301, status: 'PUBLISHED' }
+    const draft = { ...old, storyVersionId: 302, status: 'DRAFT' }
+    const other = { ...old, storybookId: 202, storyVersionId: 303 }
+    adminApi.listAdminStoryVersions.mockResolvedValueOnce({ items: [old, draft, other] })
+    await actions.loadAdminContent('storybooks')
+    const published = { ...draft, status: 'PUBLISHED' }
+    adminApi.updateAdminStoryStatus.mockResolvedValueOnce(published)
+    if (refreshSucceeds) {
+      adminApi.listAdminStoryVersions.mockResolvedValueOnce({ items: [
+        { ...old, status: 'RETIRED' }, { ...published, title: '服务端标题' }, other,
+      ] })
+    } else {
+      adminApi.listAdminStoryVersions.mockRejectedValueOnce(new ApiError('暂不可用', { status: 503 }))
+    }
+    expect(await actions.adminSetStoryStatus(302, 'PUBLISHED')).toBe(true)
+    expect(state.admin.storyVersions.map(item => item.status)).toEqual(['RETIRED', 'PUBLISHED', 'PUBLISHED'])
+    if (refreshSucceeds) expect(state.admin.storyVersions[1].title).toBe('服务端标题')
+    else {
+      expect(state.admin.error).toBeTruthy()
+      expect(state.admin.storiesLoaded).toBe(false)
+    }
+    expect(adminApi.updateAdminStoryStatus).toHaveBeenCalledTimes(1)
   })
 
   it('routes a content role to the prepared management workspace', async () => {

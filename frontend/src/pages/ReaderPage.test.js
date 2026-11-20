@@ -398,6 +398,42 @@ describe('reader state and visual progress', () => {
     expect(wrapper.props('recordPage')).not.toHaveBeenCalled()
   })
 
+  it('retraces live branch visits in order without writing progress', async () => {
+    // The branch skips page 3, then revisits page 1 before returning to page 7.
+    const session = { ...initialSession, currentPage: 7, visitedPageNumbers: [1, 7, 1, 7] }
+    render({ session })
+    const heading = () => wrapper.get('.reader-heading p').text()
+    for (const page of [1, 7, 1]) {
+      await button('上一页').trigger('click')
+      expect(heading()).toContain(`第 ${page} 页`)
+      expect(button('朗读').element.disabled).toBe(true)
+    }
+    expect(button('上一页').element.disabled).toBe(true)
+    for (const page of [7, 1, 7]) {
+      await button('下一页').trigger('click')
+      expect(heading()).toContain(`第 ${page} 页`)
+    }
+    expect(button('朗读').element.disabled).toBe(false)
+    expect(wrapper.props('recordPage')).not.toHaveBeenCalled()
+  })
+
+  it('uses the visited branch for a backward swipe and restores the live book on return', async () => {
+    let flip
+    vi.stubGlobal('OpenPageFlip', { createBook: () => ({
+      on: (_, callback) => { flip = callback }, turnTo: vi.fn(), destroy: vi.fn(),
+    }) })
+    render({ session: { ...initialSession, currentPage: 7, visitedPageNumbers: [1, 7] } }, true)
+    flip({ page: 2 })
+    await flushPromises()
+    expect(wrapper.get('.reader-heading p').text()).toContain('第 1 页')
+    expect(wrapper.findAll('.flip-page--text')).toHaveLength(2)
+    flip({ page: 2 })
+    await flushPromises()
+    expect(wrapper.get('.reader-heading p').text()).toContain('第 7 页')
+    expect(wrapper.findAll('.flip-page--text')).toHaveLength(3)
+    expect(wrapper.props('recordPage')).not.toHaveBeenCalled()
+  })
+
   it('follows the visited branch when reviewing a finished session with buttons or gestures', async () => {
     const session = { ...initialSession, currentPage: 3, visitedPageNumbers: [1, 3] }
     const branchedBook = { ...book, pageCount: 4, pages: [
