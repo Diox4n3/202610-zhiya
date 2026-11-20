@@ -135,7 +135,8 @@ def test_reading_session_create_recovery_and_isolation(bookshelf):
     session_id = session["readingSessionId"]
     assert (session["currentPage"], session["visitedPageNumbers"], session["status"], session["revision"]) == (1, [], "CREATED", 0)
     assert first.get(f"/api/v1/reading-sessions/{session_id}").json()["data"] == {
-        "session": session, "events": [], "report": None}
+        "session": {**session, "childProfileId": profile["childProfileId"], "sourceType": "LIBRARY"},
+        "events": [], "report": None}
     assert second.get(f"/api/v1/reading-sessions/{session_id}").status_code == 404
     assert second.get("/api/v1/reading-sessions").json()["data"]["items"] == []
     assert first.get("/api/v1/reading-sessions").json()["data"]["items"] == [session]
