@@ -107,9 +107,10 @@ onBeforeUnmount(() => {
     <BookDetailPage
       v-else-if="state.route.name === 'detail'"
       :book="detailBook"
-      :retry-identity="detailBook?.source === 'api' && state.auth.status === 'unavailable'"
+      :retry-identity="state.auth.status === 'unavailable' && state.route.source !== 'preview' && !!state.route.versionId"
       :checking-identity="state.profilesLoading"
       :loading="state.detailLoading || state.auth.status === 'checking'"
+      @retry-identity="zhiyaActions.retryReadingIdentity"
       @back="zhiyaActions.navigate('library')"
       @start="startBook"
     />
@@ -121,6 +122,7 @@ onBeforeUnmount(() => {
       :loading="state.sessionLoading || state.auth.status === 'checking'"
       :authenticated="state.auth.authenticated && state.auth.status === 'authenticated'"
       :sync-required="state.readingSyncRequired"
+      :can-retry-load="state.readerLoadRetryable"
       :record-page="zhiyaActions.recordPageChange"
       :complete-reading="zhiyaActions.completeReading"
       :refresh-reading="zhiyaActions.refreshReading"
@@ -129,6 +131,7 @@ onBeforeUnmount(() => {
       @back="zhiyaActions.openDetail"
       @library="zhiyaActions.navigate('library')"
       @start-session="zhiyaActions.startCurrentReading"
+      @retry-load="zhiyaActions.loadReaderRoute"
     />
     <AccountPage
       v-else-if="state.route.name === 'account'"

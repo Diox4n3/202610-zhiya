@@ -42,6 +42,62 @@ beforeEach(async () => {
 })
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
+describe('cold reader bookshelf fallback', () => {
+  it.each([
+    ['the bookshelf resolves before a 503', true, 503],
+    ['the bookshelf resolves after a 503', false, 503],
+    ['the bookshelf resolves after a 404', false, 404],
+  ])('handles the existing session when %s', async (_, bookshelfFirst, status) => {
+    localStorage.setItem('zhiya.account', 'parent-a')
+    const firstPage = deferred()
+    const bookDetail = deferred()
+    books.listStorybooks.mockClear().mockReturnValueOnce(firstPage.promise)
+    if (status === 404) books.listStorybooks.mockResolvedValueOnce([{ ...version, storyVersionId: 89 }])
+    books.getStoryVersion.mockClear().mockReturnValueOnce(bookDetail.promise)
+    reading.getReadingSession.mockClear()
+    vi.resetModules()
+    const { zhiya: refreshed, zhiyaActions: refreshedActions } = await import('./useZhiya')
+    const bootstrapping = refreshedActions.bootstrap()
+
+    await vi.waitFor(() => expect(books.getStoryVersion).toHaveBeenCalledWith(88))
+    expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual([1])
+    if (bookshelfFirst) {
+      firstPage.resolve([version])
+      await vi.waitFor(() => expect(refreshed.booksSource).toBe('api'))
+      bookDetail.reject(new ApiError('暂不可用', { status }))
+    } else {
+      bookDetail.reject(new ApiError('暂不可用', { status }))
+      await vi.advanceTimersByTimeAsync(0)
+      if (status === 404) {
+        expect(books.listStorybooks.mock.calls.map(([request]) => request.page)).toEqual([1, 1])
+        expect(refreshed.booksSource).toBe('api')
+      }
+      firstPage.resolve([version])
+    }
+    await bootstrapping
+
+    expect(location.hash).toBe('#reader/55')
+    expect(refreshed.sessionLoading).toBe(false)
+    expect(reading.getReadingSession.mock.calls).toEqual([[55]])
+    expect(books.getStoryVersion.mock.calls).toEqual([[88]])
+    expect(reading.createReadingSession).not.toHaveBeenCalled()
+    expect(reading.addReadingEvent).not.toHaveBeenCalled()
+    if (status === 404) {
+      expect(refreshed.books.some((book) => book.source === 'api' && book.storyVersionId === 88)).toBe(false)
+      expect(refreshed.currentSession).toBeNull()
+      expect(refreshed.currentBook).toBeNull()
+    } else {
+      expect(refreshed.currentSession).toEqual(session())
+      expect(refreshed.currentBook).toMatchObject({
+        storyVersionId: 88,
+        source: 'api',
+        title: version.title,
+        pages: version.pages.map(({ text }) => ({ text })),
+      })
+    }
+  })
+})
+
 describe('authoritative reading progress', () => {
   it('serializes page writes and rejects skipped or already visited pages', async () => {
     const request = deferred()

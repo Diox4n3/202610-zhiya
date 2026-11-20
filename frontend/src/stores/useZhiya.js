@@ -70,6 +70,7 @@ const state = reactive({
   currentEvents: [],
   currentReport: null,
   sessionLoading: false,
+  readerLoadRetryable: false,
   sessionBusy: false,
   profileDeleteBusyId: null,
   sessionDeleteBusyId: null,
@@ -126,6 +127,7 @@ function clearAccountViews() {
   detailRequest += 1
   readingEpoch += 1
   state.sessionLoading = state.sessionBusy = state.sessionsLoading = state.detailLoading = state.booksLoading = false
+  state.readerLoadRetryable = false
   state.readingSyncRequired = false
   state.childMode = null
   state.profileDeleteBusyId = null
@@ -218,8 +220,10 @@ function loadBooks(filters = {}, restoreBookId = pendingBookRestore) {
   const next = { ...state.bookFilters, ...filters }
   if (next.ageBand !== state.bookFilters.ageBand || next.topic !== state.bookFilters.topic) {
     state.bookFilters = next
+    pendingBookRestore = null
+  } else {
+    pendingBookRestore = restoreBookId
   }
-  pendingBookRestore = state.bookFilters.ageBand || state.bookFilters.topic ? null : restoreBookId
   state.nextBooksPage = null
   return fetchBooksPage(1)
 }
@@ -271,7 +275,7 @@ async function fetchBooksPage(page) {
       } else if (state.nextBooksPage) {
         await fetchBooksPage(state.nextBooksPage)
       } else {
-        localStorage.removeItem(key)
+        if (!state.bookFilters.ageBand && !state.bookFilters.topic) localStorage.removeItem(key)
         pendingBookRestore = null
       }
     }
@@ -299,6 +303,9 @@ function loadMoreBooks() {
 }
 
 function refreshShelfAfterNotFound() {
+  if (!pendingBookRestore && state.booksSource === 'api' && state.books.some((book) => book.id === state.manualBookId)) {
+    pendingBookRestore = state.manualBookId
+  }
   state.nextBooksPage = 1
   return fetchBooksPage(1)
 }
@@ -702,6 +709,10 @@ async function readOnlineDetail(versionId) {
       if (latest?.outcome !== 'pending') {
         detailReadsByVersion.delete(versionId)
         if (latest?.outcome === 'missing' && latest.epoch === authEpoch && latest.filters === state.bookFilters) {
+          const key = bookSelectionKey('api')
+          const missingId = `version-${versionId}`
+          if (state.auth.authenticated && localStorage.getItem(key) === missingId) localStorage.removeItem(key)
+          if (pendingBookRestore === missingId) pendingBookRestore = null
           const remaining = state.books.filter((book) => book.storyVersionId !== versionId)
           const listed = state.booksSource === 'api' && remaining.length < state.books.length
           if (listed) applyBooks(remaining, 'api')
@@ -727,7 +738,7 @@ async function loadDetail(id, source = null) {
       await firstShelfPage.catch(() => {})
       if (!isCurrent()) return
     }
-    if (source === 'preview' || (!source && preview && (!state.auth.authenticated || previewFromEmptyCatalog))) {
+    if (source === 'preview' || (!source && preview && (state.auth.status === 'anonymous' || previewFromEmptyCatalog))) {
       state.currentBook = preview || null
       return
     }
@@ -741,16 +752,22 @@ async function loadDetail(id, source = null) {
   }
 }
 
+async function retryReadingIdentity() {
+  if (state.auth.status !== 'unavailable' || state.profilesLoading) return
+  const epoch = authEpoch
+  const route = location.hash
+  await refreshIdentity()
+  if (epoch === authEpoch && route === location.hash && state.auth.status === 'unavailable') {
+    setToast('暂时无法核验家长身份，请稍后重试。', 'error')
+  }
+}
+
 async function startReading(book) {
   if (!book || state.sessionBusy) return
   const epoch = authEpoch
   if (book.source !== 'preview' && state.auth.status !== 'authenticated') {
-    if (state.auth.status === 'unavailable' && !state.profilesLoading) {
-      const route = location.hash
-      await refreshIdentity()
-      if (epoch === authEpoch && route === location.hash && state.auth.status === 'unavailable') {
-        setToast('暂时无法核验家长身份，请稍后重试。', 'error')
-      }
+    if (state.auth.status === 'unavailable') {
+      await retryReadingIdentity()
     } else if (state.auth.status === 'anonymous') {
       navigate('auth')
     }
@@ -811,6 +828,10 @@ async function startReading(book) {
   }
 }
 
+function isTemporaryReadFailure(error) {
+  return error.status === 503 || error.status === 504 || (error.status === 0 && error.retryable)
+}
+
 async function loadReaderRoute() {
   const epoch = authEpoch
   const generation = ++readingEpoch
@@ -818,6 +839,7 @@ async function loadReaderRoute() {
   const routeHash = location.hash
   const isCurrent = () => epoch === authEpoch && generation === readingEpoch && routeHash === location.hash
   state.sessionLoading = true
+  state.readerLoadRetryable = false
   state.sessionBusy = false
   state.readingSyncRequired = false
   pendingReading = null
@@ -844,13 +866,28 @@ async function loadReaderRoute() {
     if (!route.sessionId) return
     const detail = await getReadingSession(route.sessionId)
     if (!isCurrent()) return
-    const cached = state.books.find((book) => book.source === 'api' && book.storyVersionId === detail.session.storyVersionId)
-    const book = cached || mapApiBook(await getStoryVersion(detail.session.storyVersionId))
+    const versionId = detail.session.storyVersionId
+    const shelfBook = () => state.books.find((item) => item.source === 'api' && item.storyVersionId === versionId)
+    let book = shelfBook()
+    if (!book) {
+      try {
+        book = mapApiBook(await readOnlineDetail(versionId))
+      } catch (error) {
+        if (!isCurrent()) return
+        if (!isTemporaryReadFailure(error)) throw error
+        // On cold start the authorized shelf can still be loading the same full version.
+        if (firstShelfPage) await firstShelfPage.catch(() => {})
+        if (!isCurrent()) return
+        book = shelfBook()
+        if (!book) throw error
+      }
+    }
     if (!isCurrent()) return
     applyReadingDetail(detail)
     state.currentBook = book
   } catch (error) {
     if (isCurrent()) {
+      state.readerLoadRetryable = isTemporaryReadFailure(error)
       setToast(describeApiError(error), 'error')
       state.currentSession = null
     }
@@ -1295,6 +1332,7 @@ export const zhiyaActions = {
   openDetail,
   loadDetail,
   startReading,
+  retryReadingIdentity,
   startCurrentReading,
   enterChildMode,
   restoreChildMode,

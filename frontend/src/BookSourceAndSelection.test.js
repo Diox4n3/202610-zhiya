@@ -139,6 +139,62 @@ it.each([1001, 88])('keeps online version %s while retrying a failed identity ch
   expect(wrapper.get('.reader-page h1').text()).toBe(onlineBook.title)
 })
 
+it('legacy detail keeps the online book through identity recovery and reading', async () => {
+  const onlineBook = book(1001)
+  const session = {
+    readingSessionId: 55,
+    storyVersionId: 1001,
+    status: 'CREATED',
+    mode: 'PARENT_CHILD',
+    currentPage: 1,
+    visitedPageNumbers: [],
+    revision: 1,
+  }
+  listProfiles.mockRejectedValueOnce(new ApiError('档案暂不可用', { status: 503 }))
+  listProfiles.mockResolvedValueOnce([{ childProfileId: 7 }])
+  listStorybooks.mockResolvedValue([onlineBook])
+  getStoryVersion.mockResolvedValue(onlineBook)
+  createReadingSession.mockResolvedValueOnce(session)
+  getReadingSession.mockResolvedValueOnce({ session, events: [] })
+
+  await open('detail/1001')
+  expect(getStoryVersion).toHaveBeenCalledWith(1001)
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+  expect(wrapper.get('.detail-card').text()).not.toContain('设计预览')
+  expect(createReadingSession).not.toHaveBeenCalled()
+
+  await button('重试身份核验').trigger('click')
+  await flushPromises()
+  expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(window.location.hash).toBe('#detail/1001')
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+  await clickRoute(button('开始阅读'))
+
+  expect(createReadingSession.mock.calls).toEqual([[{ storyVersionId: 1001, childProfileId: 7 }]])
+  expect(window.location.hash).toBe('#reader/55')
+  expect(wrapper.get('.reader-page h1').text()).toBe(onlineBook.title)
+})
+
+it('legacy detail offers identity retry in place when the online book request also fails', async () => {
+  const onlineBook = book(1001)
+  listProfiles.mockRejectedValueOnce(new ApiError('档案暂不可用', { status: 503 }))
+  listProfiles.mockRejectedValueOnce(new ApiError('档案仍暂不可用', { status: 503 }))
+  listStorybooks.mockResolvedValue([onlineBook])
+  getStoryVersion.mockRejectedValue(new ApiError('正文暂不可用', { status: 503 }))
+
+  await open('detail/1001')
+  expect(getStoryVersion).toHaveBeenCalledWith(1001)
+  expect(wrapper.text()).not.toContain('设计预览')
+  expect(button('开始阅读')).toBeUndefined()
+
+  await button('重试身份核验').trigger('click')
+  await flushPromises()
+  expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(window.location.hash).toBe('#detail/1001')
+  expect(button('重试身份核验').element.disabled).toBe(false)
+  expect(createReadingSession).not.toHaveBeenCalled()
+})
+
 it('keeps the homepage carousel rotating after the shelf defaults to the next page', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   listStorybooks.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([book(31)])
