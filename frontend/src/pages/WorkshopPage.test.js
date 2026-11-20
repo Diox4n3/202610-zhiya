@@ -93,6 +93,17 @@ describe('original story workshop', () => {
     expect(retryGenerationAction).toHaveBeenCalledTimes(1)
   })
 
+  it('shows the shelf error and lets the guardian retry without approving again', async () => {
+    const approved = { ...draft, status: 'APPROVED_PRIVATE' }
+    const wrapper = render({ draft: approved, approvedVersion: approved, generationStatus: 'approved', shelfError: '在线书架暂不可用' })
+    expect(wrapper.get('.approved-panel [role="alert"]').text()).toBe('在线书架暂不可用')
+    const retry = wrapper.get('.approved-actions .secondary')
+    expect(retry.text()).toContain('重试')
+    await retry.trigger('click')
+    expect(wrapper.props('openShelfAction')).toHaveBeenCalledOnce()
+    expect(wrapper.props('approveAction')).not.toHaveBeenCalled()
+  })
+
   it('lets the guardian start another original after approval', async () => {
     const approved = { storyVersionId: draft.storyVersionId, title: draft.title, status: 'APPROVED_PRIVATE', pages: draft.pages }
     const resetAction = vi.fn(() => true)

@@ -496,8 +496,11 @@ function branchTarget(branch) {
                 {{ props.workshop.switchBusy ? '正在切换到续写阅读…' : `从第 ${draft.continuation.resumePageNumber} 页继续阅读` }}
               </button>
               <button v-else class="primary" type="button" @click="startApprovedStory">开始阅读这本绘本</button>
-              <button class="secondary" type="button" @click="openShelf">查看私人书架</button>
+              <button class="secondary" type="button" :disabled="props.workshop.shelfBusy" @click="openShelf">
+                {{ props.workshop.shelfBusy ? '正在读取书架…' : props.workshop.shelfError ? '重试读取私人书架' : '查看私人书架' }}
+              </button>
             </div>
+            <p v-if="props.workshop.shelfError" class="workshop-error" role="alert">{{ props.workshop.shelfError }}</p>
             <p v-if="props.workshop.switchError" class="workshop-error" role="alert">{{ props.workshop.switchError }}</p>
           </section>
         </article>

@@ -237,6 +237,93 @@ describe('workshop state and API sequencing', () => {
     expect(window.location.hash).not.toBe('#library')
   })
 
+  async function approveForWorkshop(continuation = null) {
+    await actions.generateWorkshopDraft(form)
+    storyWorkshop.approveStoryVersion.mockResolvedValueOnce({ ...draft, status: 'APPROVED_PRIVATE', continuation })
+    expect(await actions.approveWorkshopDraft()).toBe(true)
+  }
+
+  it('keeps a failed private shelf read retryable, then selects the online book from its real page', async () => {
+    await open()
+    await approveForWorkshop()
+    books.listStorybooks.mockRejectedValueOnce(new ApiError('书架读取失败', { status: 503 }))
+    expect(await actions.openApprovedPrivateShelf()).toBe(false)
+    expect(window.location.hash).toBe('#workshop')
+    expect(state.workshop.shelfError).toContain('书架读取失败')
+    expect(state.booksSource).toBe('preview')
+    expect(state.books.every(book => book.source === 'preview')).toBe(true)
+
+    books.listStorybooks.mockResolvedValueOnce(Array.from({ length: 30 }, (_, i) => ({
+      ...draft, storyVersionId: i + 100, status: 'PUBLISHED',
+    }))).mockResolvedValueOnce([{ ...draft, status: 'APPROVED_PRIVATE' }])
+    expect(await actions.openApprovedPrivateShelf()).toBe(true)
+    expect(state.selectedBookId).toBe('version-31')
+    expect(state.books.every(book => book.source === 'api')).toBe(true)
+    expect(window.location.hash).toBe('#library')
+  })
+
+  it('does not reinsert a cached approval when the server returns an empty shelf', async () => {
+    await open()
+    await approveForWorkshop()
+    expect(await actions.openApprovedPrivateShelf()).toBe(false)
+    expect(state.workshop.shelfError).toBeTruthy()
+    expect(state.books.some(book => book.id === 'version-31')).toBe(false)
+  })
+
+  it.each(['success', 'stale'])('ignores a late %s switch after the guardian leaves', async outcome => {
+    books.getStoryVersion.mockResolvedValue({ ...draft, storyVersionId: 30, status: 'APPROVED_PRIVATE' })
+    await open('workshop/continue/55')
+    await approveForWorkshop({ sourceReadingSessionId: 55, sourceRevision: 4, resumePageNumber: 3 })
+    let resolveSwitch, rejectSwitch
+    reading.createReadingSession.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveSwitch = resolve
+      rejectSwitch = reject
+    }))
+    const switching = actions.switchWorkshopContinuation()
+    const destination = outcome === 'success' ? 'library' : 'workshop'
+    actions.navigate(destination)
+    await actions.syncRoute()
+    if (outcome === 'stale') {
+      storyWorkshop.generateStory.mockResolvedValueOnce({ ...draft, storyVersionId: 99 })
+      expect(await actions.generateWorkshopDraft(form)).toBe(true)
+      rejectSwitch(new ApiError('进度过期', { status: 409, code: 'CONTINUATION_STALE' }))
+    } else {
+      resolveSwitch({ readingSessionId: 77, currentPage: 3 })
+    }
+    expect(await switching).toBe(false)
+    expect(window.location.hash).toBe('#' + destination)
+    if (outcome === 'stale') {
+      expect(state.workshop.draft.storyVersionId).toBe(99)
+      expect(reading.getReadingSession).toHaveBeenCalledTimes(1)
+    } else {
+      expect(state.currentSession).toBeNull()
+      expect(state.workshop.switchBusy).toBe(false)
+      actions.navigate('workshop/continue/55')
+      await actions.syncRoute()
+      expect(await actions.switchWorkshopContinuation()).toBe(true)
+      expect(reading.createReadingSession.mock.calls[1][0]).toEqual(reading.createReadingSession.mock.calls[0][0])
+    }
+  })
+
+  it('ignores a stale-source refresh error after the guardian leaves the workshop', async () => {
+    books.getStoryVersion.mockResolvedValue({ ...draft, status: 'APPROVED_PRIVATE' })
+    await open('workshop/continue/55')
+    await approveForWorkshop({ sourceReadingSessionId: 55, sourceRevision: 4, resumePageNumber: 3 })
+    let rejectRefresh
+    reading.createReadingSession.mockRejectedValueOnce(new ApiError('进度过期', { status: 409, code: 'CONTINUATION_STALE' }))
+    reading.getReadingSession.mockImplementationOnce(() => new Promise((_, reject) => { rejectRefresh = reject }))
+    const switching = actions.switchWorkshopContinuation()
+    await vi.waitFor(() => expect(rejectRefresh).toBeTypeOf('function'))
+    actions.navigate('library')
+    await actions.syncRoute()
+    const previousToast = state.toast.message
+    rejectRefresh(new Error('旧会话读取失败'))
+    expect(await switching).toBe(false)
+    expect(state.toast.message).toBe(previousToast)
+    expect(state.workshop.continuationError).toBe('')
+    expect(state.workshop.continuationLoading).toBe(false)
+  })
+
   it('reloads stale progress and waits for the guardian before generating again', async () => {
     books.getStoryVersion.mockResolvedValue({ ...draft, status: 'RETIRED' })
     await open('workshop/continue/55')
