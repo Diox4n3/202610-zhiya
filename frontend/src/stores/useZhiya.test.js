@@ -10,7 +10,17 @@ vi.mock('../api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), logout: vi
 vi.mock('../api/profiles', () => ({ listProfiles: vi.fn(), createProfile: vi.fn(), updateProfile: vi.fn(), deleteProfile: vi.fn() }))
 vi.mock('../api/storybooks', () => ({ listStorybooks: vi.fn(), getStoryVersion: vi.fn(), recommendStorybooks: vi.fn() }))
 vi.mock('../api/admin', () => ({ listAdminStoryVersions: vi.fn(), listAdminKnowledge: vi.fn(), createAdminStory: vi.fn(), updateAdminStoryStatus: vi.fn(), createAdminKnowledge: vi.fn(), updateAdminKnowledge: vi.fn() }))
-vi.mock('../api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn(), addReadingEvent: vi.fn(), completeReadingSession: vi.fn(), listReadingSessions: vi.fn(), deleteReadingSession: vi.fn(), updateReadingMode: vi.fn() }))
+vi.mock('../api/reading', () => ({
+  createReadingSession: vi.fn(),
+  getReadingSession: vi.fn(),
+  addReadingEvent: vi.fn(),
+  requestReadingGuidance: vi.fn(),
+  chooseReadingBranch: vi.fn(),
+  completeReadingSession: vi.fn(),
+  listReadingSessions: vi.fn(),
+  deleteReadingSession: vi.fn(),
+  updateReadingMode: vi.fn(),
+}))
 
 const session = (overrides = {}) => ({ readingSessionId: 55, storyVersionId: 88, mode: 'PARENT_CHILD', currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS', ...overrides })
 const detail = (overrides = {}) => ({ session: session(overrides), events: [], report: null })
@@ -35,6 +45,8 @@ beforeEach(async () => {
   adminApi.listAdminKnowledge.mockResolvedValue({ items: [], page: 1, pageSize: 100 })
   reading.getReadingSession.mockImplementation(async () => detail())
   reading.addReadingEvent.mockResolvedValue({ revision: 2 })
+  reading.requestReadingGuidance.mockResolvedValue({ interactionEventId: 2, revision: 2, outputText: '你能指一指小兔吗？', strategyType: 'CONCRETE_RECALL', status: 'GENERATED', sources: [] })
+  reading.chooseReadingBranch.mockResolvedValue({ readingSessionId: 55, branchId: 501, currentPage: 3, revision: 2, interactionEventId: 3, visitedPageNumbers: [1, 3], nextPage: { pageNumber: 3 } })
   reading.listReadingSessions.mockResolvedValue([session()])
   profiles.deleteProfile.mockResolvedValue(undefined)
   reading.deleteReadingSession.mockResolvedValue(undefined)
@@ -221,6 +233,95 @@ describe('authoritative reading progress', () => {
     expect(await actions.startCurrentReading()).toBe(true)
     expect(reading.addReadingEvent.mock.calls[0][1]).toMatchObject({ eventType: 'STARTED', expectedRevision: 0, pageNumber: 1 })
     expect(state.currentSession.status).toBe('IN_PROGRESS')
+  })
+
+  it('uses API-017 for an initial question and appends the recoverable event', async () => {
+    expect(await actions.requestGuidance('INITIAL')).toBe(true)
+    expect(reading.requestReadingGuidance).toHaveBeenCalledWith(55, expect.objectContaining({
+      pageNumber: 1,
+      feedback: 'INITIAL',
+      expectedRevision: 1,
+    }))
+    expect(state.currentSession.revision).toBe(2)
+    expect(state.currentEvents.at(-1)).toMatchObject({
+      interactionEventId: 2,
+      eventType: 'QUESTION',
+      pageNumber: 1,
+      outputText: '你能指一指小兔吗？',
+      strategyType: 'CONCRETE_RECALL',
+    })
+  })
+
+  it('records understanding feedback as recoverable FEEDBACK without advancing the page', async () => {
+    expect(await actions.requestGuidance('UNDERSTOOD')).toBe(true)
+    expect(reading.requestReadingGuidance.mock.calls[0][1]).toMatchObject({
+      pageNumber: 1,
+      feedback: 'UNDERSTOOD',
+      expectedRevision: 1,
+    })
+    expect(state.currentSession.currentPage).toBe(1)
+    expect(state.currentEvents.at(-1)).toMatchObject({
+      eventType: 'FEEDBACK',
+      feedback: 'UNDERSTOOD',
+      outputText: '你能指一指小兔吗？',
+    })
+  })
+
+  it('submits a trimmed ANSWER through API-015 and updates the revision', async () => {
+    reading.addReadingEvent.mockResolvedValueOnce({ interactionEventId: 9, revision: 3 })
+    expect(await actions.submitAnswer('  小兔躲在树后。  ')).toBe(true)
+    expect(reading.addReadingEvent.mock.calls[0][1]).toMatchObject({
+      eventType: 'ANSWER',
+      pageNumber: 1,
+      inputText: '小兔躲在树后。',
+      expectedRevision: 1,
+    })
+    expect(state.currentSession.revision).toBe(3)
+    expect(state.currentEvents.at(-1)).toMatchObject({ eventType: 'ANSWER', interactionEventId: 9 })
+  })
+
+  it('chooses an approved branch through API-018 and installs the authoritative path', async () => {
+    expect(await actions.chooseBranch(501)).toBe(true)
+    expect(reading.chooseReadingBranch).toHaveBeenCalledWith(55, expect.objectContaining({
+      branchId: 501,
+      expectedRevision: 1,
+    }))
+    expect(state.currentSession).toMatchObject({
+      currentPage: 3,
+      visitedPageNumbers: [1, 3],
+      revision: 2,
+      status: 'IN_PROGRESS',
+    })
+    expect(state.currentEvents.at(-1)).toMatchObject({
+      eventType: 'BRANCH_CHOSEN',
+      branchId: 501,
+      pageNumber: 1,
+    })
+  })
+
+  it('replays the exact guidance request after an unknown transport outcome', async () => {
+    reading.requestReadingGuidance.mockRejectedValueOnce(new ApiError('pending', { status: 0, code: 'REQUEST_OUTCOME_UNKNOWN' }))
+    reading.getReadingSession.mockRejectedValueOnce(new Error('offline'))
+    expect(await actions.requestGuidance('INITIAL')).toBe(false)
+    const original = structuredClone(reading.requestReadingGuidance.mock.calls[0][1])
+    expect(state.readingSyncRequired).toBe(true)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(await actions.refreshReading()).toBe(true)
+    expect(reading.requestReadingGuidance).toHaveBeenCalledTimes(2)
+    expect(reading.requestReadingGuidance.mock.calls[1][1]).toEqual(original)
+    expect(state.readingSyncRequired).toBe(false)
+  })
+
+  it('reloads the session after a guidance conflict and uses its new revision', async () => {
+    reading.requestReadingGuidance.mockRejectedValueOnce(new ApiError('changed', { status: 409, code: 'SESSION_CONFLICT' }))
+    reading.getReadingSession.mockResolvedValueOnce(detail({ revision: 6 }))
+    expect(await actions.requestGuidance('INITIAL')).toBe(false)
+    expect(state.currentSession.revision).toBe(6)
+    expect(state.readingSyncRequired).toBe(false)
+    reading.requestReadingGuidance.mockResolvedValueOnce({ interactionEventId: 18, revision: 7, outputText: '再看一次画面。', strategyType: 'CONCRETE_RECALL' })
+    expect(await actions.requestGuidance('INITIAL')).toBe(true)
+    expect(reading.requestReadingGuidance.mock.calls[1][1].expectedRevision).toBe(6)
+    expect(state.currentSession.revision).toBe(7)
   })
 
   it('does not overwrite a reloaded session with a late result from the old view', async () => {
