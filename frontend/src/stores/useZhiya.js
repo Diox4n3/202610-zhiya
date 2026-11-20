@@ -371,7 +371,9 @@ async function loadRecommendations(topic = state.recommendationTopic) {
   const epoch = authEpoch
   const request = ++recommendationRequest
   const isCurrent = () => epoch === authEpoch && request === recommendationRequest && activeProfile()?.childProfileId === profile.childProfileId
-  state.recommendationTopic = String(topic || '').trim()
+  const nextTopic = String(topic || '').trim()
+  if (nextTopic !== state.recommendationTopic) state.recommendations = []
+  state.recommendationTopic = nextTopic
   state.recommendationsLoading = true
   state.recommendationsError = ''
   try {

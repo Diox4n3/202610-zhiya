@@ -388,6 +388,25 @@ describe('recommendations and content operations', () => {
     })
   })
 
+  it('clears displayed topic reasons immediately and ignores late results after reset', async () => {
+    await actions.signIn('parent-a', 'password123')
+    const old = { storyVersionId: 88, reason: '符合主题「友谊」' }
+    books.recommendStorybooks.mockResolvedValueOnce([old])
+    await actions.loadRecommendations('友谊')
+    expect(state.recommendations[0].reason).toBe(old.reason)
+    const pending = deferred()
+    const reset = deferred()
+    books.recommendStorybooks.mockReturnValueOnce(pending.promise).mockReturnValueOnce(reset.promise)
+    const refreshing = actions.loadRecommendations('友谊')
+    const resetting = actions.loadRecommendations('')
+    expect(state.recommendations).toEqual([])
+    reset.resolve([{ storyVersionId: 88, reason: '符合年龄' }])
+    expect(await resetting).toBe(true)
+    pending.resolve([old])
+    expect(await refreshing).toBe(false)
+    expect(state.recommendations[0].reason).toBe('符合年龄')
+  })
+
   it('clears recommendations and discards a late result after deleting the selected profile', async () => {
     await actions.signIn('parent-a', 'password123')
     const pending = deferred()

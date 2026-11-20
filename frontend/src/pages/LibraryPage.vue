@@ -32,23 +32,24 @@ const selectedRecommendation = computed(() => (
   props.recommendations.find((item) => item.storyVersionId === selected.value?.storyVersionId) || null
 ))
 
+function applyFilters(ageBand, topic) {
+  emit('filter', { ageBand, topic })
+  emit('recommend', topic)
+}
+
 function toggleCategory(value) {
   category.value = category.value === value ? '' : value
-  if (!category.value) emit('filter', { ageBand: '', topic: '' })
+  if (!category.value) applyFilters('', '')
 }
 
 function resetFilters() {
   category.value = ''
-  emit('filter', { ageBand: '', topic: '' })
-  emit('recommend', '')
+  applyFilters('', '')
 }
 
 function chooseFilter(value) {
-  if (category.value === 'age') emit('filter', { ageBand: value, topic: '' })
-  if (category.value === 'topic') {
-    emit('filter', { ageBand: '', topic: value })
-    emit('recommend', value)
-  }
+  if (category.value === 'age') applyFilters(value, '')
+  if (category.value === 'topic') applyFilters('', value)
 }
 </script>
 

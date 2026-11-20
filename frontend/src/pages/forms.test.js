@@ -297,6 +297,21 @@ describe('recommendations and content workspace', () => {
     expect(wrapper.emitted('filter').at(-1)).toEqual([{ ageBand: '', topic: '友谊' }])
   })
 
+  it.each(['collapse', 'age'])('clears the recommendation topic on %s', async (action) => {
+    const wrapper = render(LibraryPage, {})
+    const click = (label) => wrapper.findAll('button').find((item) => item.text() === label).trigger('click')
+    await click('主题')
+    await click('友谊')
+    if (action === 'collapse') {
+      await click('主题')
+    } else {
+      await click('年龄')
+      await click('4–5 岁')
+    }
+    expect(wrapper.emitted('filter').at(-1)).toEqual([{ ageBand: action === 'age' ? 'AGE_4_5' : '', topic: '' }])
+    expect(wrapper.emitted('recommend')).toEqual([['友谊'], ['']])
+  })
+
   it('builds a draft payload and exposes publish actions', async () => {
     const createStoryAction = vi.fn().mockResolvedValue(true)
     const setStoryStatusAction = vi.fn().mockResolvedValue(true)

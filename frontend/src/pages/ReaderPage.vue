@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import FlipBook from '../components/FlipBook.vue'
 import { synthesize, transcribe } from '../api/voice'
 import { describeApiError } from '../api/client'
@@ -48,6 +48,7 @@ let recordingStream = null
 let submitRecording = false
 let voiceGeneration = 0
 let recognitionRequest = null
+let initialGuidanceRequest = null
 let audio = null
 let audioGeneration = 0
 let speechRequest = null
@@ -84,9 +85,9 @@ const nextIndex = computed(() => reviewingHistory.value
 const rereading = computed(() => currentPage.value?.pageNumber !== props.session?.currentPage)
 const canFinish = computed(() => !props.loading && !turnBusy.value && !interactionBusy.value && !props.syncRequired && props.session?.status === 'IN_PROGRESS' && (props.session?.preview || props.authenticated))
 const mediaAllowed = computed(() => canFinish.value && !rereading.value)
-const canSubmitFeedback = computed(() => mediaAllowed.value && Boolean(currentQuestion.value) && !questionSkipped.value)
+const canSubmitFeedback = computed(() => mediaAllowed.value && Boolean(currentQuestion.value) && !questionSkipped.value && !questionBlocked.value)
 const canSkipQuestion = computed(() => mediaAllowed.value && !questionSkipped.value)
-const canAnswer = computed(() => mediaAllowed.value && (props.session?.preview || (Boolean(currentQuestion.value) && !questionSkipped.value)))
+const canAnswer = computed(() => props.session?.preview ? mediaAllowed.value : canSubmitFeedback.value)
 const childBookChoices = computed(() => {
   const items = props.book ? [props.book, ...props.availableBooks] : props.availableBooks
   return [...new Map(items.filter((item) => item.storyVersionId).map((item) => [item.storyVersionId, item])).values()]
@@ -102,14 +103,18 @@ async function ensurePageQuestion(force = false) {
   pendingGuidanceKey.value = key
   guidanceError.value = ''
   try {
-    const saved = await props.requestGuidance('INITIAL')
+    initialGuidanceRequest = props.requestGuidance('INITIAL')
+    const saved = await initialGuidanceRequest
     if (!saved && pageGuidanceKey.value === key && autoGuidanceKey.value === key && !turnBusy.value && !interactionBusy.value
         && !questionSkipped.value && !currentQuestion.value && !rereading.value) {
       guidanceError.value = '本页问题暂时没有生成，可以重试，或先跳过继续阅读。'
     }
     return saved
   } finally {
-    if (pendingGuidanceKey.value === key) pendingGuidanceKey.value = ''
+    if (pendingGuidanceKey.value === key) {
+      pendingGuidanceKey.value = ''
+      initialGuidanceRequest = null
+    }
   }
 }
 
@@ -230,8 +235,14 @@ async function playNarration() {
   const pageNumber = currentPage.value.pageNumber
   if (!props.session.preview) {
     try {
-      speechRequest = new AbortController()
       audioStatus.value = 'loading'
+      if (guidanceLoading.value && initialGuidanceRequest) {
+        audioMessage.value = '等待本页提问完成后朗读'
+        await initialGuidanceRequest
+        await nextTick()
+        if (generation !== audioGeneration) return
+      }
+      speechRequest = new AbortController()
       audioMessage.value = '正在生成朗读'
       const data = await synthesize(voiceSnapshot(), speechRequest.signal)
       if (generation !== audioGeneration) return
@@ -504,7 +515,16 @@ async function refreshProgress() {
   }
 }
 
-watch(() => [props.session?.readingSessionId, props.session?.currentPage, props.session?.revision, props.session?.status, props.authenticated, props.loading, props.syncRequired], ([id, pageNumber], [previousId, previousPage]) => {
+// A recording uses a revision-bound recognition request. Narration belongs to the page.
+watch(() => props.session?.revision, closeVoice)
+watch([
+  () => props.session?.readingSessionId,
+  () => props.session?.currentPage,
+  () => props.session?.status,
+  () => props.authenticated,
+  () => props.loading,
+  () => props.syncRequired,
+], ([id, pageNumber], [previousId, previousPage]) => {
   if (id !== previousId || pageNumber !== previousPage) {
     previewAnswer.value = ''
     guidanceError.value = ''
@@ -553,7 +573,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
         <nav class="reader-dock" aria-label="阅读控制">
           <button class="dock-button" type="button" :disabled="pageIndex === 0 || turnBusy || interactionBusy || syncRequired" @click="goPrevious"><span class="dock-glyph">‹</span>上一页</button>
           <button class="dock-button" type="button" :disabled="!mediaAllowed" @click="playNarration"><span class="dock-glyph">{{ audioStatus === 'playing' ? 'Ⅱ' : '▶' }}</span>{{ audioStatus === 'playing' ? '暂停朗读' : audioStatus === 'loading' ? '取消朗读' : '朗读' }}</button>
-          <button class="dock-button primary" type="button" :disabled="!mediaAllowed" @click="openVoice()"><span class="dock-glyph">芽</span>语音识别</button>
+          <button class="dock-button primary" type="button" :disabled="!canAnswer" @click="openVoice()"><span class="dock-glyph">芽</span>语音识别</button>
           <button v-if="isLast && !readerPages[nextIndex]" class="dock-button" type="button" :disabled="!canFinish" @click="finishReading"><span class="dock-glyph">✓</span>完成</button>
           <button v-else class="dock-button" type="button" :disabled="turnBusy || interactionBusy || syncRequired || !readerPages[nextIndex] || (!reviewingHistory && session.status !== 'IN_PROGRESS')" @click="goNext"><span class="dock-glyph">›</span>下一页</button>
         </nav>
@@ -567,8 +587,8 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
           <h2>✦ 共读小提问</h2>
           <p v-if="session.preview">{{ `本地预览问题：${currentPage?.question}` }}</p>
           <p v-else-if="questionSkipped">这一页的提问已跳过，可以继续翻页。</p>
+          <p v-else-if="questionBlocked">{{ latestGuidanceEvent.outputText || '这个问题先请家长和孩子一起聊一聊。' }}</p>
           <p v-else-if="currentQuestion">{{ currentQuestion.outputText }}</p>
-          <p v-else-if="questionBlocked">这个问题先请家长和孩子一起聊一聊。</p>
           <p v-else-if="guidanceLoading">正在根据这一页生成问题…</p>
           <p v-else-if="guidanceError">{{ guidanceError }}</p>
           <p v-else>当前页暂时没有可用的问题。</p>

@@ -303,6 +303,35 @@ describe('narration lifecycle', () => {
     expect(speechSynthesis.cancel).toHaveBeenCalled()
   })
 
+  it('preserves active narration when a same-page question advances the revision', async () => {
+    render()
+    await button('朗读').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ session: { ...initialSession, revision: 2 }, events: [questionEvent, {
+      ...questionEvent, interactionEventId: 11, outputText: '小兔看到了什么？',
+    }] })
+    expect(audios[0].play).toHaveBeenCalledTimes(1)
+    expect(audios[0].pause).not.toHaveBeenCalled()
+  })
+
+  it.each(['play', 'cancel'])('waits for INITIAL before requesting narration: %s', async (action) => {
+    const pending = deferred()
+    render({ events: [], requestGuidance: () => pending.promise })
+    await button('朗读').trigger('click')
+    expect(synthesize).not.toHaveBeenCalled()
+    if (action === 'cancel') await button('取消朗读').trigger('click')
+    await wrapper.setProps({ session: { ...initialSession, revision: 2 }, events: [questionEvent] })
+    pending.resolve(true)
+    await flushPromises()
+    if (action === 'cancel') {
+      expect(synthesize).not.toHaveBeenCalled()
+    } else {
+      expect(synthesize).toHaveBeenCalledTimes(1)
+      expect(synthesize.mock.calls[0][0]).toEqual({ readingSessionId: 55, pageNumber: 1, revision: 2 })
+      expect(audios[0].play).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it('ignores synthesis returned after cancelling the loading state', async () => {
     const speech = deferred()
     synthesize.mockReturnValueOnce(speech.promise)
@@ -501,7 +530,11 @@ describe('reader state and visual progress', () => {
 
   it.each(['IN_PROGRESS', 'FINISHED', 'INTERRUPTED'])('keeps the revisit hint consistent with media controls in %s sessions', async (status) => {
     const record = vi.fn()
-    render({ session: { ...initialSession, status, currentPage: 3, visitedPageNumbers: [1, 3], revision: 2 }, recordPage: record })
+    render({
+      session: { ...initialSession, status, currentPage: 3, visitedPageNumbers: [1, 3], revision: 2 },
+      events: [{ ...questionEvent, pageNumber: 3 }],
+      recordPage: record,
+    })
     await button('上一页').trigger('click')
     expect(wrapper.text()).toContain('回看已读页')
     expect(wrapper.text().includes('返回当前进度后可继续朗读与录音')).toBe(status === 'IN_PROGRESS')
@@ -549,6 +582,7 @@ describe('guided reading interactions', () => {
     const requestGuidance = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(true)
     render({ events: [], requestGuidance })
     await flushPromises()
+    expect(button('语音识别').element.disabled).toBe(true)
     expect(button('跳过本页').element.disabled).toBe(false)
     expect(button('下一页').element.disabled).toBe(false)
     await button('跳过本页').trigger('click')
@@ -563,6 +597,21 @@ describe('guided reading interactions', () => {
     await button('还没懂').trigger('click')
     await flushPromises()
     expect(requestGuidance).toHaveBeenCalledWith('NOT_UNDERSTOOD')
+  })
+
+  it('shows the latest safety response and leaves skip and navigation available', async () => {
+    const requestGuidance = vi.fn().mockResolvedValue(true)
+    const blocked = { interactionEventId: 11, eventType: 'FEEDBACK', pageNumber: 1,
+      feedback: 'NOT_UNDERSTOOD', strategyType: 'SAFETY_BLOCK', outputText: '这个问题我们请爸爸妈妈来一起说好吗？' }
+    render({ requestGuidance, events: [questionEvent, blocked] })
+    expect(wrapper.text()).toContain(blocked.outputText)
+    expect(wrapper.text()).not.toContain(questionEvent.outputText)
+    for (const label of ['已理解', '还没懂', '输入回答', '语音识别']) {
+      expect(button(label).element.disabled).toBe(true)
+    }
+    expect(button('下一页').element.disabled).toBe(false)
+    await button('跳过本页').trigger('click')
+    expect(requestGuidance.mock.calls).toEqual([['SKIPPED']])
   })
 
   it('restores skipped prompts and does not silently generate another one', async () => {
