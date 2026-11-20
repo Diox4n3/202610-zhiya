@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
+import { mountApp } from '../tests/mountApp'
 import { ApiError } from './api/client'
 import { login, parentUnlock } from './api/auth'
 import { deleteProfile, listProfiles } from './api/profiles'
@@ -37,9 +38,8 @@ function holdBookshelfPage(pageToHold) {
 
 async function open(path) {
   window.history.replaceState({}, '', '/#' + path)
-  const { default: App } = await import('./App.vue')
   const flipBook = { template: '<div />', methods: { showPage() {} } }
-  wrapper = mount(App, { global: { stubs: { BookCarousel: true, FlipBook: flipBook } } })
+  wrapper = await mountApp({ global: { stubs: { BookCarousel: true, FlipBook: flipBook } } })
   await flushPromises()
 }
 
@@ -53,7 +53,10 @@ beforeEach(() => {
   listReadingSessions.mockResolvedValue([])
   getDeletionStatus.mockResolvedValue(false)
 })
-afterEach(() => wrapper?.unmount())
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = undefined
+})
 
 it('opens cold-start growth history before the saved bookshelf selection is restored', async () => {
   const releaseFirstPage = holdBookshelfPage(1)

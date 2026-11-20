@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
+import { mountApp } from '../tests/mountApp'
 import { ApiError } from './api/client'
 import { listProfiles } from './api/profiles'
 import { getStoryVersion, listStorybooks } from './api/storybooks'
@@ -23,9 +24,8 @@ let wrapper
 
 async function open(path) {
   window.history.replaceState({}, '', '/#' + path)
-  const { default: App } = await import('./App.vue')
   const flipBook = { template: '<div />', methods: { showPage() {} } }
-  wrapper = mount(App, { global: { stubs: { BookCarousel: true, FlipBook: flipBook } } })
+  wrapper = await mountApp({ global: { stubs: { BookCarousel: true, FlipBook: flipBook } } })
   await flushPromises()
 }
 
