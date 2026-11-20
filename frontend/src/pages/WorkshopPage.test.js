@@ -93,6 +93,28 @@ describe('original story workshop', () => {
     expect(retryGenerationAction).toHaveBeenCalledTimes(1)
   })
 
+  it('lets the guardian start another original after approval', async () => {
+    const approved = { ...draft, status: 'APPROVED_PRIVATE' }
+    const resetAction = vi.fn(() => true)
+    const wrapper = render({}, { resetAction })
+    await wrapper.findAll('.choice-chip').find(button => button.text() === '勇气').trigger('click')
+    await wrapper.setProps({ workshop: workshop({ draft: approved, approvedVersion: approved, generationStatus: 'approved' }) })
+    await wrapper.get('.draft-heading-actions button').trigger('click')
+    expect(resetAction).toHaveBeenCalledTimes(1)
+    await wrapper.setProps({ workshop: workshop() })
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.props('generateAction')).toHaveBeenCalledWith(expect.objectContaining({ topic: '友谊' }))
+  })
+
+  it('lets the guardian close a server-confirmed unknown outcome without submitting again', async () => {
+    const resetAction = vi.fn(() => true)
+    const wrapper = render({ generationStatus: 'endedUnknown' }, { resetAction })
+    expect(wrapper.get('.workshop-submit').attributes('disabled')).toBeDefined()
+    await wrapper.get('.workshop-result-state button').trigger('click')
+    expect(resetAction).toHaveBeenCalledTimes(1)
+    expect(wrapper.props('generateAction')).not.toHaveBeenCalled()
+  })
+
   it('explains continuation limits and starts from the approved resume point', async () => {
     const continueReadingAction = vi.fn(async () => true)
     const approved = {

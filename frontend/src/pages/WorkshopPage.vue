@@ -26,13 +26,17 @@ const topicOptions = ['友谊', '勇气', '自然观察', '亲子依恋', '想�
 const characterOptions = ['小兔', '小熊', '家人', '小狐狸', '小猫']
 const sceneOptions = ['森林', '海边', '夜晚', '雨后花园', '山谷']
 
-const form = reactive({
-  ageBand: props.activeProfile?.ageBand || 'AGE_4_5',
-  topic: '友谊',
-  characters: ['小兔'],
-  scene: '森林',
-  branching: true,
-})
+function initialForm() {
+  return {
+    ageBand: props.activeProfile?.ageBand || 'AGE_4_5',
+    topic: '友谊',
+    characters: ['小兔'],
+    scene: '森林',
+    branching: true,
+  }
+}
+
+const form = reactive(initialForm())
 const customCharacter = ref('')
 const localError = ref('')
 const reviewedAll = ref(false)
@@ -43,8 +47,17 @@ const draft = computed(() => props.workshop.draft)
 const approvedVersion = computed(() => props.workshop.approvedVersion)
 const generationBusy = computed(() => ['running', 'checking'].includes(props.workshop.generationStatus))
 const generationUnknown = computed(() => props.workshop.generationStatus === 'unknown')
+const generationEnded = computed(() => props.workshop.generationStatus === 'endedUnknown')
 const reviewVisible = computed(() => Boolean(draft.value) && ['review', 'approved'].includes(props.workshop.generationStatus))
-const formLocked = computed(() => generationBusy.value || generationUnknown.value || reviewVisible.value)
+const formLocked = computed(() => generationBusy.value || generationUnknown.value || generationEnded.value || reviewVisible.value)
+const submitLabel = computed(() => {
+  if (generationBusy.value) return '正在生成故事草稿…'
+  if (generationEnded.value) return '本次生成已结束'
+  if (approvedVersion.value) return '本书已审核'
+  if (reviewVisible.value) return '请先审核当前草稿'
+  if (generationUnknown.value) return '确认生成结果'
+  return isContinuation.value ? '生成续写草稿' : '生成原创草稿'
+})
 const continuationPageCount = computed(() => continuation.value?.session?.visitedPageNumbers?.length || 0)
 const continuationCanBranch = computed(() => !isContinuation.value || continuationPageCount.value <= 3)
 const continuationCanGenerate = computed(() => !isContinuation.value || continuationPageCount.value <= 5)
@@ -141,9 +154,14 @@ function submitGeneration() {
 }
 
 function resetDraft() {
+  const newStory = Boolean(approvedVersion.value)
+  if (!props.resetAction()) return
+  if (newStory) {
+    Object.assign(form, initialForm())
+    customCharacter.value = ''
+  }
   reviewedAll.value = false
   localError.value = ''
-  props.resetAction()
 }
 
 function openShelf() {
@@ -330,9 +348,9 @@ function branchTarget(branch) {
             <button
               class="primary workshop-submit"
               type="submit"
-              :disabled="generationBusy || reviewVisible || !continuationCanGenerate"
+              :disabled="generationBusy || generationEnded || reviewVisible || !continuationCanGenerate"
             >
-              {{ generationBusy ? '正在生成故事草稿…' : reviewVisible ? '请先审核当前草稿' : generationUnknown ? '确认生成结果' : isContinuation ? '生成续写草稿' : '生成原创草稿' }}
+              {{ submitLabel }}
             </button>
             <p class="workshop-form-note">
               生成通常需要一段时间。插图来自已经审核的模板，不会实时生成专属图片。
@@ -353,12 +371,13 @@ function branchTarget(branch) {
           <small>生成请求最长约 60 秒；页面会保留这一次请求，不会自动重复提交。</small>
         </div>
 
-        <div v-else-if="generationUnknown" class="workshop-state workshop-result-state">
+        <div v-else-if="generationUnknown || generationEnded" class="workshop-state workshop-result-state">
           <span class="state-symbol">?</span>
-          <p class="eyebrow">生成结果待确认</p>
-          <h2>这次生成可能仍在处理中</h2>
+          <p class="eyebrow">{{ generationEnded ? '生成请求已结束' : '生成结果待确认' }}</p>
+          <h2>{{ generationEnded ? '无法确认本次生成结果' : '这次生成可能仍在处理中' }}</h2>
           <p>{{ props.workshop.generationError }}</p>
-          <button class="primary" type="button" @click="props.retryGenerationAction()">确认生成结果</button>
+          <button v-if="generationEnded" class="primary" type="button" @click="resetDraft">结束本次创作</button>
+          <button v-else class="primary" type="button" @click="props.retryGenerationAction()">确认生成结果</button>
         </div>
 
         <div v-else-if="props.workshop.generationStatus === 'failed'" class="workshop-state workshop-result-state error-state">
@@ -380,7 +399,9 @@ function branchTarget(branch) {
             </div>
             <div class="draft-heading-actions">
               <span v-if="isContinuation" class="draft-continuation-badge">从第 {{ resumePageNumber }} 页续写</span>
-              <button v-if="props.workshop.generationStatus !== 'approved'" class="text-button" type="button" @click="resetDraft">重新设置条件</button>
+              <button v-if="!approvedVersion || !isContinuation" class="text-button" type="button" :disabled="props.workshop.approvalBusy" @click="resetDraft">
+                {{ approvedVersion ? '再创作一本' : '重新设置条件' }}
+              </button>
             </div>
           </header>
 

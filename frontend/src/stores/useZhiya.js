@@ -631,7 +631,7 @@ async function runWorkshopGeneration(payload, checking = false) {
     setToast('请先登录家长账号。', 'error')
     return false
   }
-  if (state.workshop.generationStatus === 'running') return false
+  if (['running', 'checking'].includes(state.workshop.generationStatus)) return false
   const epoch = authEpoch
   const request = ++workshopRequest
   state.workshop.pendingGeneration = payload
@@ -648,6 +648,12 @@ async function runWorkshopGeneration(payload, checking = false) {
     return true
   } catch (error) {
     if (epoch !== authEpoch || request !== workshopRequest) return false
+    if (error.status === 504 && error.code === 'REQUEST_OUTCOME_UNKNOWN') {
+      state.workshop.generationStatus = 'endedUnknown'
+      state.workshop.generationError = '服务端已结束这次请求，无法确认生成结果。你可以结束本次创作，再决定是否重新生成。'
+      state.workshop.pendingGeneration = null
+      return false
+    }
     const unresolved = error.code === 'REQUEST_IN_PROGRESS'
       || error.code === 'REQUEST_OUTCOME_UNKNOWN'
       || error.status === 504
@@ -662,7 +668,7 @@ async function runWorkshopGeneration(payload, checking = false) {
 }
 
 async function generateWorkshopDraft(form) {
-  if (['running', 'checking'].includes(state.workshop.generationStatus)) return false
+  if (['running', 'checking', 'endedUnknown'].includes(state.workshop.generationStatus)) return false
   if (['review', 'approved'].includes(state.workshop.generationStatus) && state.workshop.draft) return false
   if (state.workshop.generationStatus === 'unknown' && state.workshop.pendingGeneration) {
     return retryWorkshopGeneration()
@@ -686,6 +692,7 @@ async function retryWorkshopGeneration() {
 
 function resetWorkshopDraft() {
   if (['running', 'checking'].includes(state.workshop.generationStatus)) return false
+  if (state.workshop.approvalBusy || state.workshop.switchBusy) return false
   state.workshop.draft = null
   state.workshop.approvedVersion = null
   state.workshop.generationStatus = 'idle'
@@ -743,9 +750,7 @@ function installApprovedWorkshopVersion(version) {
 async function recoverApprovedWorkshopVersion(versionId) {
   try {
     const version = await getStoryVersion(versionId)
-    if (version?.status !== 'APPROVED_PRIVATE') return null
-    installApprovedWorkshopVersion(version)
-    return version
+    return version?.status === 'APPROVED_PRIVATE' ? version : null
   } catch {
     return null
   }
@@ -755,20 +760,23 @@ async function approveWorkshopDraft() {
   const draft = state.workshop.draft
   if (!draft || draft.status !== 'PENDING_REVIEW' || state.workshop.approvalBusy) return false
   const epoch = authEpoch
-  state.workshop.approvalBusy = true
+  const workshop = state.workshop
+  const isCurrent = () => epoch === authEpoch && state.workshop === workshop
+  workshop.approvalBusy = true
   state.workshop.generationError = ''
   try {
     const approved = await approveStoryVersion(draft.storyVersionId, draft.versionNumber)
-    if (epoch !== authEpoch) return false
+    if (!isCurrent()) return false
     installApprovedWorkshopVersion(approved)
     setToast('审核完成，绘本已进入你的私人书架')
     return true
   } catch (error) {
-    if (epoch !== authEpoch) return false
+    if (!isCurrent()) return false
     if (error.code === 'REQUEST_OUTCOME_UNKNOWN' || error.status === 409 || error.status === 504) {
       const recovered = await recoverApprovedWorkshopVersion(draft.storyVersionId)
-      if (epoch !== authEpoch) return false
+      if (!isCurrent()) return false
       if (recovered) {
+        installApprovedWorkshopVersion(recovered)
         setToast('审核结果已确认，绘本已进入你的私人书架')
         return true
       }
@@ -777,14 +785,16 @@ async function approveWorkshopDraft() {
     setToast(state.workshop.generationError, 'error')
     return false
   } finally {
-    if (epoch === authEpoch) state.workshop.approvalBusy = false
+    if (isCurrent()) workshop.approvalBusy = false
   }
 }
 
 async function openApprovedPrivateShelf() {
   const version = state.workshop.approvedVersion
-  if (!version) return false
+  if (!version || !hasGuardianSession()) return false
+  const epoch = authEpoch
   await loadBooks({ ageBand: '', topic: '' })
+  if (epoch !== authEpoch || state.workshop.approvedVersion !== version) return false
   const id = `version-${version.storyVersionId}`
   if (!state.books.some((book) => book.id === id)) {
     const approvedBook = mapApiBook({
@@ -2024,7 +2034,7 @@ async function handleRoute() {
       replaceRoute('admin/storybooks')
       return
     }
-    if (!route.sourceSessionId && (state.workshop.continuation || state.workshop.continuationLoading)) {
+    if (!route.sourceSessionId && (state.workshop.continuation || state.workshop.continuationLoading || state.workshop.continuationError)) {
       workshopRequest += 1
       state.workshop = emptyWorkshopState()
     }

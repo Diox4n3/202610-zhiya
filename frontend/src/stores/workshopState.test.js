@@ -151,7 +151,7 @@ describe('workshop state and API sequencing', () => {
   it('confirms an uncertain generation with the exact original payload and idempotency key', async () => {
     await open()
     storyWorkshop.generateStory
-      .mockRejectedValueOnce(new ApiError('生成结果未知', { status: 504, code: 'REQUEST_OUTCOME_UNKNOWN' }))
+      .mockRejectedValueOnce(new ApiError('网络中断', { code: 'REQUEST_OUTCOME_UNKNOWN' }))
       .mockResolvedValueOnce(draft)
 
     expect(await actions.generateWorkshopDraft(form)).toBe(false)
@@ -176,6 +176,63 @@ describe('workshop state and API sequencing', () => {
     expect(storyWorkshop.approveStoryVersion).toHaveBeenCalledWith(31, 1)
     expect(state.workshop.generationStatus).toBe('approved')
     expect(state.workshop.approvedVersion.status).toBe('APPROVED_PRIVATE')
+  })
+
+  it('starts a fresh request only after the guardian closes a terminal unknown result', async () => {
+    await open()
+    storyWorkshop.generateStory.mockRejectedValueOnce(new ApiError('生成结果未知', {
+      status: 504, code: 'REQUEST_OUTCOME_UNKNOWN',
+    }))
+    await actions.generateWorkshopDraft(form)
+    expect(state.workshop.generationStatus).toBe('endedUnknown')
+    expect(await actions.generateWorkshopDraft(form)).toBe(false)
+    expect(storyWorkshop.generateStory).toHaveBeenCalledTimes(1)
+    expect(actions.resetWorkshopDraft()).toBe(true)
+    expect(await actions.generateWorkshopDraft(form)).toBe(true)
+    const [first, second] = storyWorkshop.generateStory.mock.calls
+    expect(first[0].clientRequestId).not.toBe(second[0].clientRequestId)
+  })
+
+  it('clears a failed continuation when opening the regular workshop', async () => {
+    reading.getReadingSession.mockRejectedValueOnce(new Error('无法读取会话'))
+    await open('workshop/continue/55')
+    expect(state.workshop.continuationError).toBeTruthy()
+    window.history.replaceState({}, '', '/#workshop')
+    await actions.syncRoute()
+    expect(state.workshop.continuationError).toBe('')
+    expect(await actions.generateWorkshopDraft(form)).toBe(true)
+    expect(storyWorkshop.generateStory.mock.calls[0][0]).not.toHaveProperty('sourceReadingSessionId')
+  })
+
+  it('discards an approval lookup that finishes after logout', async () => {
+    await open()
+    await actions.generateWorkshopDraft(form)
+    storyWorkshop.approveStoryVersion.mockRejectedValueOnce(new ApiError('timeout', { status: 504 }))
+    let finishLookup
+    books.getStoryVersion.mockImplementationOnce(() => new Promise(resolve => { finishLookup = resolve }))
+    const approving = actions.approveWorkshopDraft()
+    await vi.waitFor(() => expect(finishLookup).toBeTypeOf('function'))
+    await actions.signOut()
+    finishLookup({ ...draft, status: 'APPROVED_PRIVATE' })
+    expect(await approving).toBe(false)
+    expect(state.workshop.draft).toBeNull()
+    expect(state.workshop.approvedVersion).toBeNull()
+  })
+
+  it('discards a shelf refresh that finishes after logout', async () => {
+    await open()
+    await actions.generateWorkshopDraft(form)
+    storyWorkshop.approveStoryVersion.mockResolvedValueOnce({ ...draft, status: 'APPROVED_PRIVATE' })
+    await actions.approveWorkshopDraft()
+    let finishCatalog
+    books.listStorybooks.mockImplementationOnce(() => new Promise(resolve => { finishCatalog = resolve }))
+    const opening = actions.openApprovedPrivateShelf()
+    await vi.waitFor(() => expect(finishCatalog).toBeTypeOf('function'))
+    await actions.signOut()
+    finishCatalog([])
+    expect(await opening).toBe(false)
+    expect(state.books.some(book => book.id === 'version-' + draft.storyVersionId)).toBe(false)
+    expect(window.location.hash).not.toBe('#library')
   })
 
   it('continues from the frozen session revision and switches to the approved resume page', async () => {
