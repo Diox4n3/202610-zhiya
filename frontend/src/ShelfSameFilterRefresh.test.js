@@ -101,3 +101,29 @@ it('restores saved book 63 after reselecting All during the initial shelf restor
   expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63')
   expect(localStorage.getItem('zhiya.selectedBookId')).toBe('version-63')
 })
+
+it('keeps restored book 63 after reselecting All once the initial shelf restore completes', async () => {
+  localStorage.setItem('zhiya.selectedBookId', 'version-63')
+  const catalog = Array.from({ length: 63 }, (_, index) => ({
+    ...availableBook,
+    storyVersionId: index + 1,
+    title: '绘本' + (index + 1),
+  }))
+  listStorybooks.mockImplementation(async ({ page, pageSize }) => catalog.slice((page - 1) * pageSize, page * pageSize))
+
+  window.history.replaceState({}, '', '/#library')
+  const { default: App } = await import('./App.vue')
+  wrapper = mount(App, { global: { stubs: { BookCarousel: true } } })
+  await flushPromises()
+
+  expect(listStorybooks.mock.calls).toEqual([1, 2, 3].map((page) => [{ ...allQuery, page }]))
+  expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63')
+  const all = wrapper.get('.library-category-chip.active')
+  expect(all.text()).toBe('全部')
+  await all.trigger('click')
+  await flushPromises()
+
+  expect(listStorybooks.mock.calls).toEqual([1, 2, 3, 1, 2, 3].map((page) => [{ ...allQuery, page }]))
+  expect(wrapper.get('.library-feature-copy h2').text()).toBe('绘本63')
+  expect(localStorage.getItem('zhiya.selectedBookId')).toBe('version-63')
+})

@@ -216,7 +216,13 @@ function loadPreviewBooks(message = '', emptyCatalog = false) {
   applyBooks(filtered, 'preview', message)
 }
 
-function loadBooks(filters = {}, restoreBookId = pendingBookRestore) {
+function shelfRestoreTarget() {
+  if (pendingBookRestore) return pendingBookRestore
+  if (state.booksSource === 'api' && state.books.some((book) => book.id === state.manualBookId)) return state.manualBookId
+  return null
+}
+
+function loadBooks(filters = {}, restoreBookId = shelfRestoreTarget()) {
   const next = { ...state.bookFilters, ...filters }
   if (next.ageBand !== state.bookFilters.ageBand || next.topic !== state.bookFilters.topic) {
     state.bookFilters = next
@@ -303,9 +309,7 @@ function loadMoreBooks() {
 }
 
 function refreshShelfAfterNotFound() {
-  if (!pendingBookRestore && state.booksSource === 'api' && state.books.some((book) => book.id === state.manualBookId)) {
-    pendingBookRestore = state.manualBookId
-  }
+  pendingBookRestore = shelfRestoreTarget()
   state.nextBooksPage = 1
   return fetchBooksPage(1)
 }
@@ -745,6 +749,8 @@ async function loadDetail(id, source = null) {
     const version = await readOnlineDetail(versionId)
     if (!isCurrent()) return
     state.currentBook = mapApiBook(version)
+    // Keep a resolved legacy link online across identity retries on this detail page.
+    if (!source && state.route.name === 'detail' && state.route.versionId === versionId) state.route.source = 'api'
   } catch (error) {
     if (isCurrent()) setToast(describeApiError(error), 'error')
   } finally {

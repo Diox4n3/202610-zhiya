@@ -195,6 +195,43 @@ it('legacy detail offers identity retry in place when the online book request al
   expect(createReadingSession).not.toHaveBeenCalled()
 })
 
+it.each([200, 404])('legacy detail preserves its online source when identity recovery finds an empty catalog and detail returns %s', async (status) => {
+  const onlineBook = book(1001)
+  listProfiles.mockRejectedValueOnce(new ApiError('档案暂不可用', { status: 503 }))
+  listProfiles.mockResolvedValueOnce([{ childProfileId: 7 }])
+  listStorybooks.mockResolvedValue([])
+  getStoryVersion.mockResolvedValueOnce(onlineBook)
+  if (status === 404) {
+    getStoryVersion.mockRejectedValueOnce(new ApiError('资源不可用', { status: 404, code: 'RESOURCE_NOT_FOUND' }))
+  } else {
+    getStoryVersion.mockResolvedValueOnce(onlineBook)
+  }
+
+  await open('detail/1001')
+  expect(listProfiles).toHaveBeenCalledTimes(1)
+  expect(listStorybooks).not.toHaveBeenCalled()
+  expect(getStoryVersion).toHaveBeenCalledExactlyOnceWith(1001)
+  expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+
+  await button('重试身份核验').trigger('click')
+  await flushPromises()
+
+  expect(listProfiles).toHaveBeenCalledTimes(2)
+  expect(listStorybooks).toHaveBeenCalled()
+  expect(getStoryVersion.mock.calls).toEqual([[1001], [1001]])
+  expect(window.location.hash).toBe('#detail/1001')
+  if (status === 404) {
+    expect(wrapper.find('.detail-card').exists()).toBe(false)
+    expect(wrapper.get('.detail-page .empty-state h2').text()).toBe('绘本暂不可用')
+    expect(wrapper.get('.toast').text()).toBe('资源不可用')
+    expect(button('开始阅读')).toBeUndefined()
+  } else {
+    expect(wrapper.get('.detail-card h1').text()).toBe(onlineBook.title)
+    expect(button('开始阅读')).toBeDefined()
+  }
+  expect(createReadingSession).not.toHaveBeenCalled()
+})
+
 it('keeps the homepage carousel rotating after the shelf defaults to the next page', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   listStorybooks.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([book(31)])
