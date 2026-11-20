@@ -74,6 +74,8 @@ const form = {
   branching: true,
 }
 const sourceSession = {
+  childProfileId: 7,
+  sourceType: 'ORIGINAL',
   readingSessionId: 55,
   storyVersionId: 30,
   mode: 'PARENT_CHILD',
@@ -235,13 +237,44 @@ describe('workshop state and API sequencing', () => {
     expect(window.location.hash).not.toBe('#library')
   })
 
+  it('reloads stale progress and waits for the guardian before generating again', async () => {
+    books.getStoryVersion.mockResolvedValue({ ...draft, status: 'RETIRED' })
+    await open('workshop/continue/55')
+    reading.getReadingSession.mockResolvedValue({ session: {
+      ...sourceSession, revision: 5, currentPage: 3, visitedPageNumbers: [1, 2, 3],
+    } })
+    storyWorkshop.generateStory.mockRejectedValueOnce(new ApiError('进度已更新', { status: 409, code: 'CONTINUATION_STALE' }))
+    expect(await actions.generateWorkshopDraft(form)).toBe(false)
+    expect(state.workshop.continuation.session.revision).toBe(5)
+    expect(state.workshop.continuation.resumePageNumber).toBe(4)
+    expect(storyWorkshop.generateStory).toHaveBeenCalledTimes(1)
+    expect(await actions.generateWorkshopDraft(form)).toBe(true)
+    const [first, second] = storyWorkshop.generateStory.mock.calls
+    expect(second[0]).toMatchObject({ expectedRevision: 5, sourceReadingSessionId: 55 })
+    expect(second[0].clientRequestId).not.toBe(first[0].clientRequestId)
+  })
+
+  it('rejects a retired public library version on the continuation route', async () => {
+    reading.getReadingSession.mockResolvedValue({ session: { ...sourceSession, sourceType: 'LIBRARY' } })
+    books.getStoryVersion.mockResolvedValue({ ...draft, status: 'RETIRED' })
+    await open('workshop/continue/55')
+    expect(state.workshop.continuation).toBeNull()
+    expect(state.workshop.continuationError).toBeTruthy()
+    expect(storyWorkshop.generateStory).not.toHaveBeenCalled()
+  })
+
   it('continues from the frozen session revision and switches to the approved resume page', async () => {
+    profiles.listProfiles.mockResolvedValue([
+      { childProfileId: 8, nickname: '小松', ageBand: 'AGE_3_4' },
+      { childProfileId: 7, nickname: '小芽', ageBand: 'AGE_4_5' },
+    ])
     books.getStoryVersion.mockResolvedValue({
       ...draft,
       storyVersionId: 30,
       status: 'APPROVED_PRIVATE',
     })
     await open('workshop/continue/55')
+    expect(state.activeProfileId).toBe(8)
     expect(state.workshop.continuation.session.revision).toBe(4)
 
     await actions.generateWorkshopDraft(form)

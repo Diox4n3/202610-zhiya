@@ -82,7 +82,10 @@ const checks = computed(() => {
   ].map((item) => ({ ...item, passed: checks[item.key] === true }))
 })
 const allChecksPassed = computed(() => checks.value.every((item) => item.passed))
-const selectedAge = computed(() => ageOptions.find((item) => item.value === form.ageBand)?.label || '适龄范围')
+const selectedAge = computed(() => {
+  const ageBand = isContinuation.value ? continuation.value.profile?.ageBand : form.ageBand
+  return ageOptions.find(item => item.value === ageBand)?.label || '适龄范围'
+})
 const pageLabel = computed(() => draft.value ? `${draft.value.pages?.length || 0} 页` : '4–6 页')
 const editStatusLabel = computed(() => {
   if (generationBusy.value) return '生成中'
@@ -248,6 +251,7 @@ function branchTarget(branch) {
             </div>
             <div>
               <h3>前文会原样保留</h3>
+              <p>本次续写使用源会话档案：{{ continuation.profile?.nickname || `档案 #${continuation.session.childProfileId}` }}。</p>
               <p>正文与已审核配图固定不变，新内容从第 {{ resumePageNumber }} 页接入。</p>
               <span class="branch-note" :class="{ warning: !continuationCanBranch }">
                 {{ continuationCanBranch ? '这次仍可选择是否加入剧情分支' : '前文页数较多，续写将使用单线故事' }}
@@ -410,7 +414,7 @@ function branchTarget(branch) {
             前 {{ continuationPageCount }} 个已读页面沿用原文和冻结配图；从第 {{ resumePageNumber }} 页开始是新增内容。
           </div>
 
-          <div class="check-strip" aria-label="内容检查结果">
+          <div v-if="props.workshop.generationStatus === 'review'" class="check-strip" aria-label="内容检查结果">
             <span v-for="check in checks" :key="check.key" :class="{ passed: check.passed }">
               <b>{{ check.passed ? '✓' : '!' }}</b>{{ check.label }}{{ check.passed ? '通过' : '待确认' }}
             </span>

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import FlipBook from '../components/FlipBook.vue'
 import { synthesize, transcribe } from '../api/voice'
 import { describeApiError } from '../api/client'
+import { canContinueStory } from '../data/readingProgress'
 
 const props = defineProps({
   book: { type: Object, default: null },
@@ -539,7 +540,7 @@ onBeforeUnmount(() => { stopNarration(); closeVoice() })
         <button v-else-if="session.status === 'CREATED'" class="primary" type="button" @click="emit('start-session')">开始本次阅读</button>
         <button v-if="!showDockFinish && session.status === 'IN_PROGRESS'" class="secondary" type="button" :disabled="!canFinish" @click="finishReading">结束本次阅读</button>
         <button
-          v-if="authenticated && !session.preview && session.mode === 'PARENT_CHILD' && session.status === 'IN_PROGRESS' && book.status === 'APPROVED_PRIVATE'"
+          v-if="authenticated && !session.preview && canContinueStory(session, book)"
           class="secondary"
           type="button"
           @click="emit('continue-story')"

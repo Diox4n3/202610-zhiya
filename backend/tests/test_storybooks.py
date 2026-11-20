@@ -567,6 +567,8 @@ def test_retired_library_version_allows_active_content_and_finished_history_repl
     }).status_code == 404
     assert 11 not in [item["storyVersionId"] for item in first.get("/api/v1/storybooks").json()["data"]["items"]]
     assert 11 not in [item["storyVersionId"] for item in first.get("/api/v1/storybooks", params={"scope": "mine"}).json()["data"]["items"]]
+    detail = first.get(f"/api/v1/reading-sessions/{session}").json()["data"]["session"]
+    assert detail["sourceType"] == "LIBRARY" and detail["childProfileId"] == profile_id
     assert first.get("/api/v1/story-versions/11").status_code == 200  # active session can still read story pages
     assert first.post(events, headers=headers, json={
         "eventType": "PAGE_CHANGED", "pageNumber": 2, "expectedRevision": 1, "clientEventId": "page2"

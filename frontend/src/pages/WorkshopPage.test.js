@@ -94,11 +94,12 @@ describe('original story workshop', () => {
   })
 
   it('lets the guardian start another original after approval', async () => {
-    const approved = { ...draft, status: 'APPROVED_PRIVATE' }
+    const approved = { storyVersionId: draft.storyVersionId, title: draft.title, status: 'APPROVED_PRIVATE', pages: draft.pages }
     const resetAction = vi.fn(() => true)
     const wrapper = render({}, { resetAction })
     await wrapper.findAll('.choice-chip').find(button => button.text() === '勇气').trigger('click')
     await wrapper.setProps({ workshop: workshop({ draft: approved, approvedVersion: approved, generationStatus: 'approved' }) })
+    expect(wrapper.find('.check-strip').exists()).toBe(false)
     await wrapper.get('.draft-heading-actions button').trigger('click')
     expect(resetAction).toHaveBeenCalledTimes(1)
     await wrapper.setProps({ workshop: workshop() })
@@ -123,7 +124,9 @@ describe('original story workshop', () => {
       continuation: { resumePageNumber: 3, sourceRevision: 4 },
     }
     const continuation = {
+      profile: { childProfileId: 8, nickname: '小松', ageBand: 'AGE_3_4' },
       session: {
+        childProfileId: 8,
         readingSessionId: 55,
         status: 'IN_PROGRESS',
         mode: 'PARENT_CHILD',
@@ -140,6 +143,7 @@ describe('original story workshop', () => {
       continuation,
     }, { continueReadingAction })
 
+    expect(wrapper.get('.continuation-card').text()).toContain('源会话档案：小松')
     expect(wrapper.text()).toContain('前 2 个已读页面沿用原文和冻结配图')
     expect(wrapper.text()).toContain('从第 3 页继续阅读')
     await wrapper.get('.approved-actions .primary').trigger('click')

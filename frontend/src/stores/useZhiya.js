@@ -25,7 +25,7 @@ import {
 } from '../api/reading'
 import { approveStoryVersion, generateStory } from '../api/storyWorkshop'
 import { previewBooks, mapApiBook } from '../data/preview'
-import { countReadPages } from '../data/readingProgress'
+import { canContinueStory, countReadPages } from '../data/readingProgress'
 
 const CHILD_SESSION_KEY = 'zhiya.childHandoffSessionId'
 const PENDING_SESSION_DELETES = 'zhiya.pendingSessionDeletes'
@@ -648,6 +648,12 @@ async function runWorkshopGeneration(payload, checking = false) {
     return true
   } catch (error) {
     if (epoch !== authEpoch || request !== workshopRequest) return false
+    if (error.code === 'CONTINUATION_STALE' && payload.sourceReadingSessionId) {
+      if (await loadWorkshopContinuation(payload.sourceReadingSessionId)) {
+        setToast('源会话进度已更新，请核对已读页数后再生成。')
+      }
+      return false
+    }
     if (error.status === 504 && error.code === 'REQUEST_OUTCOME_UNKNOWN') {
       state.workshop.generationStatus = 'endedUnknown'
       state.workshop.generationError = '服务端已结束这次请求，无法确认生成结果。你可以结束本次创作，再决定是否重新生成。'
@@ -719,11 +725,16 @@ async function loadWorkshopContinuation(sessionId) {
     if (detail.session.status !== 'IN_PROGRESS' || detail.session.mode !== 'PARENT_CHILD') {
       throw new Error('只有进行中的亲子共读会话可以续写。')
     }
-    if (!['APPROVED_PRIVATE', 'RETIRED'].includes(version.status)) {
+    if (!canContinueStory(detail.session, version)) {
       throw new Error('只有家长审核过的私人原创绘本可以续写。')
+    }
+    const profileId = detail.session.childProfileId
+    if (!Number.isSafeInteger(profileId) || profileId < 1) {
+      throw new Error('无法确认源会话所属的儿童档案。')
     }
     state.workshop.continuation = {
       session: detail.session,
+      profile: state.profiles.find(profile => profile.childProfileId === profileId),
       version,
       resumePageNumber: (detail.session.visitedPageNumbers || []).length + 1,
     }
@@ -813,18 +824,13 @@ async function openApprovedPrivateShelf() {
 async function switchWorkshopContinuation() {
   const target = state.workshop.approvedVersion
   const continuation = state.workshop.continuation
-  const profile = activeProfile()
   if (target?.continuation && continuation?.session && state.workshop.switchBusy) return false
   if (!target?.continuation || !continuation?.session) {
     state.workshop.switchError = '当前版本不含可切换的续写快照。'
     return false
   }
-  if (!profile) {
-    state.workshop.switchError = '请选择与本次阅读相同的儿童档案后再继续。'
-    return false
-  }
   const payload = state.workshop.switchPending || {
-    childProfileId: profile.childProfileId,
+    childProfileId: continuation.session.childProfileId,
     storyVersionId: target.storyVersionId,
     mode: 'PARENT_CHILD',
     sourceReadingSessionId: continuation.session.readingSessionId,
