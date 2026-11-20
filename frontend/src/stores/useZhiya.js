@@ -64,6 +64,7 @@ const state = reactive({
   bookFilters: { ageBand: '', topic: '' },
   selectedBookId: '',
   manualBookId: '',
+  pendingBookRestore: null,
   currentBook: null,
   detailLoading: false,
   currentSession: null,
@@ -93,7 +94,7 @@ let booksRequest = 0
 let firstShelfPage = null
 let previewFromEmptyCatalog = false
 let selectionRevision = 0
-let pendingBookRestore = null
+let loadedBookFilters = null
 let detailRequest = 0
 const detailReadsByVersion = new Map()
 let sessionsRequest = 0
@@ -119,7 +120,7 @@ function clearAccountViews() {
   state.bookFilters = { ageBand: '', topic: '' }
   state.selectedBookId = ''
   firstShelfPage = null
-  pendingBookRestore = null
+  state.pendingBookRestore = null
   detailReadsByVersion.clear()
   profilesRequest += 1
   booksRequest += 1
@@ -217,8 +218,9 @@ function loadPreviewBooks(message = '', emptyCatalog = false) {
 }
 
 function shelfRestoreTarget() {
-  if (pendingBookRestore) return pendingBookRestore
-  if (state.booksSource === 'api' && state.books.some((book) => book.id === state.manualBookId)) return state.manualBookId
+  if (state.pendingBookRestore) return state.pendingBookRestore
+  if (state.booksSource !== 'api' || loadedBookFilters !== state.bookFilters) return null
+  if (state.books.some((book) => book.id === state.manualBookId)) return state.manualBookId
   return null
 }
 
@@ -226,9 +228,9 @@ function loadBooks(filters = {}, restoreBookId = shelfRestoreTarget()) {
   const next = { ...state.bookFilters, ...filters }
   if (next.ageBand !== state.bookFilters.ageBand || next.topic !== state.bookFilters.topic) {
     state.bookFilters = next
-    pendingBookRestore = null
+    state.pendingBookRestore = null
   } else {
-    pendingBookRestore = restoreBookId
+    state.pendingBookRestore = restoreBookId
   }
   state.nextBooksPage = null
   return fetchBooksPage(1)
@@ -240,7 +242,7 @@ async function fetchBooksPage(page) {
   const selectionAtStart = selectionRevision
   if (page === 1) previewFromEmptyCatalog = false
   const pageSize = 30
-  const keepSelection = pendingBookRestore !== null || Boolean(state.booksError && state.selectedBookId)
+  const keepSelection = state.pendingBookRestore !== null || Boolean(state.booksError && state.selectedBookId)
   state.booksLoading = true
   state.booksError = ''
   let pageRequest
@@ -269,20 +271,21 @@ async function fetchBooksPage(page) {
     } else if (!items.length && !state.bookFilters.ageBand && !state.bookFilters.topic) {
       loadPreviewBooks('后端当前没有可见的已发布绘本，当前展示本地设计预览。', true)
     } else {
+      loadedBookFilters = state.bookFilters
       applyBooks(items.map(mapApiBook), 'api')
     }
-    if (pendingBookRestore) {
+    if (state.pendingBookRestore) {
       const key = bookSelectionKey('api')
-      if (localStorage.getItem(key) !== pendingBookRestore) {
-        pendingBookRestore = null
-      } else if (state.books.some((book) => book.id === pendingBookRestore)) {
-        state.selectedBookId = pendingBookRestore
-        pendingBookRestore = null
+      if (localStorage.getItem(key) !== state.pendingBookRestore) {
+        state.pendingBookRestore = null
+      } else if (state.books.some((book) => book.id === state.pendingBookRestore)) {
+        state.selectedBookId = state.pendingBookRestore
+        state.pendingBookRestore = null
       } else if (state.nextBooksPage) {
         await fetchBooksPage(state.nextBooksPage)
       } else {
         if (!state.bookFilters.ageBand && !state.bookFilters.topic) localStorage.removeItem(key)
-        pendingBookRestore = null
+        state.pendingBookRestore = null
       }
     }
   } catch (error) {
@@ -290,7 +293,7 @@ async function fetchBooksPage(page) {
     if (error instanceof ApiError && error.status === 401) {
       resetAuthentication()
       loadPreviewBooks('登录后读取后端绘本，当前展示本地设计预览。')
-    } else if (pendingBookRestore || state.nextBooksPage !== null) {
+    } else if (state.pendingBookRestore || state.nextBooksPage !== null) {
       state.nextBooksPage = page
       state.booksError = error.message || '书架加载失败，请重试。'
     } else {
@@ -309,7 +312,7 @@ function loadMoreBooks() {
 }
 
 function refreshShelfAfterNotFound() {
-  pendingBookRestore = shelfRestoreTarget()
+  state.pendingBookRestore = shelfRestoreTarget()
   state.nextBooksPage = 1
   return fetchBooksPage(1)
 }
@@ -681,7 +684,11 @@ async function removeReadingSession(sessionId, confirmedUnlisted = false) {
 function selectBook(bookId) {
   if (!state.books.some((book) => book.id === bookId)) return
   selectionRevision += 1
-  pendingBookRestore = null
+  if (state.booksSource === 'api') {
+    // A first-page refresh will replace the visible shelf, including the book just picked.
+    const refreshingSameShelf = loadedBookFilters === state.bookFilters && (firstShelfPage || state.nextBooksPage === 1)
+    state.pendingBookRestore = refreshingSameShelf ? bookId : null
+  }
   state.selectedBookId = bookId
   state.manualBookId = bookId
   localStorage.setItem(bookSelectionKey(state.booksSource), bookId)
@@ -716,7 +723,7 @@ async function readOnlineDetail(versionId) {
           const key = bookSelectionKey('api')
           const missingId = `version-${versionId}`
           if (state.auth.authenticated && localStorage.getItem(key) === missingId) localStorage.removeItem(key)
-          if (pendingBookRestore === missingId) pendingBookRestore = null
+          if (state.pendingBookRestore === missingId) state.pendingBookRestore = null
           const remaining = state.books.filter((book) => book.storyVersionId !== versionId)
           const listed = state.booksSource === 'api' && remaining.length < state.books.length
           if (listed) applyBooks(remaining, 'api')
