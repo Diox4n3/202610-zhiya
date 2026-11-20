@@ -3,12 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError } from './api/client'
 import { login, parentUnlock } from './api/auth'
 import { deleteProfile, listProfiles } from './api/profiles'
-import { getStoryVersion, listStorybooks } from './api/storybooks'
+import { getStoryVersion, listStorybooks, recommendStorybooks } from './api/storybooks'
 import { addReadingEvent, createReadingSession, deleteReadingSession, getDeletionStatus, getReadingSession, listReadingSessions, updateReadingMode } from './api/reading'
 
-vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), parentUnlock: vi.fn() }))
+vi.mock('./api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), logout: vi.fn(), parentUnlock: vi.fn(), register: vi.fn() }))
 vi.mock('./api/profiles', () => ({ listProfiles: vi.fn(async () => []), deleteProfile: vi.fn() }))
-vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn() }))
+vi.mock('./api/storybooks', () => ({ getStoryVersion: vi.fn(), listStorybooks: vi.fn(), recommendStorybooks: vi.fn() }))
 vi.mock('./api/reading', () => ({ getReadingSession: vi.fn(), addReadingEvent: vi.fn(), createReadingSession: vi.fn(), deleteReadingSession: vi.fn(), getDeletionStatus: vi.fn(), listReadingSessions: vi.fn(), updateReadingMode: vi.fn() }))
 
 const book = { storyVersionId: 88, title: '书架上的绘本', status: 'PUBLISHED', pages: [{ pageNumber: 1, text: '只在授权时可读的正文' }] }
@@ -49,6 +49,7 @@ beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
   listStorybooks.mockResolvedValue([book])
+  recommendStorybooks.mockResolvedValue([])
   listReadingSessions.mockResolvedValue([])
   getDeletionStatus.mockResolvedValue(false)
 })

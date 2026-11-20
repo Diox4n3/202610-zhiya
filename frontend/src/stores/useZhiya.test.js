@@ -4,10 +4,12 @@ import * as auth from '../api/auth'
 import * as profiles from '../api/profiles'
 import * as books from '../api/storybooks'
 import * as reading from '../api/reading'
+import * as adminApi from '../api/admin'
 
 vi.mock('../api/auth', () => ({ checkHealth: vi.fn(), login: vi.fn(), logout: vi.fn(), parentUnlock: vi.fn(), register: vi.fn() }))
 vi.mock('../api/profiles', () => ({ listProfiles: vi.fn(), createProfile: vi.fn(), updateProfile: vi.fn(), deleteProfile: vi.fn() }))
-vi.mock('../api/storybooks', () => ({ listStorybooks: vi.fn(), getStoryVersion: vi.fn() }))
+vi.mock('../api/storybooks', () => ({ listStorybooks: vi.fn(), getStoryVersion: vi.fn(), recommendStorybooks: vi.fn() }))
+vi.mock('../api/admin', () => ({ listAdminStoryVersions: vi.fn(), listAdminKnowledge: vi.fn(), createAdminStory: vi.fn(), updateAdminStoryStatus: vi.fn(), createAdminKnowledge: vi.fn(), updateAdminKnowledge: vi.fn() }))
 vi.mock('../api/reading', () => ({ createReadingSession: vi.fn(), getReadingSession: vi.fn(), addReadingEvent: vi.fn(), completeReadingSession: vi.fn(), listReadingSessions: vi.fn(), deleteReadingSession: vi.fn(), updateReadingMode: vi.fn() }))
 
 const session = (overrides = {}) => ({ readingSessionId: 55, storyVersionId: 88, mode: 'PARENT_CHILD', currentPage: 1, visitedPageNumbers: [1], revision: 1, status: 'IN_PROGRESS', ...overrides })
@@ -28,6 +30,9 @@ beforeEach(async () => {
   profiles.listProfiles.mockResolvedValue([{ childProfileId: 1, nickname: '小芽' }])
   books.listStorybooks.mockResolvedValue([version])
   books.getStoryVersion.mockResolvedValue(version)
+  books.recommendStorybooks.mockResolvedValue([])
+  adminApi.listAdminStoryVersions.mockResolvedValue({ items: [], page: 1, pageSize: 100 })
+  adminApi.listAdminKnowledge.mockResolvedValue({ items: [], page: 1, pageSize: 100 })
   reading.getReadingSession.mockImplementation(async () => detail())
   reading.addReadingEvent.mockResolvedValue({ revision: 2 })
   reading.listReadingSessions.mockResolvedValue([session()])
@@ -228,6 +233,46 @@ describe('authoritative reading progress', () => {
     await oldWrite
     expect(state.currentSession.currentPage).toBe(7)
     expect(state.currentSession.revision).toBe(5)
+  })
+})
+
+describe('recommendations and content operations', () => {
+  it('loads recommendations for the active profile and resolves their shelf records', async () => {
+    books.recommendStorybooks.mockResolvedValueOnce([
+      { storyVersionId: 88, reason: '符合 4～5 岁与兴趣「动物」', sources: [] },
+    ])
+    auth.login.mockResolvedValueOnce({ data: { accountId: 1, role: 'GUARDIAN' } })
+    await actions.signIn('parent-a', 'password123')
+    expect(books.recommendStorybooks).toHaveBeenCalledWith({
+      childProfileId: 1,
+      topic: undefined,
+      minutes: undefined,
+    })
+    expect(state.recommendations).toHaveLength(1)
+    expect(state.recommendations[0]).toMatchObject({
+      storyVersionId: 88,
+      reason: '符合 4～5 岁与兴趣「动物」',
+      book: { storyVersionId: 88, title: '测试绘本' },
+    })
+  })
+
+  it('routes a content role to the prepared management workspace', async () => {
+    auth.login.mockResolvedValueOnce({ data: { accountId: 9, role: 'ADMIN' } })
+    adminApi.listAdminStoryVersions.mockResolvedValueOnce({
+      items: [{ storyVersionId: 201, title: '待审绘本', status: 'DRAFT', pages: [], topics: [] }],
+      page: 1,
+      pageSize: 100,
+    })
+    adminApi.listAdminKnowledge.mockResolvedValueOnce({
+      items: [{ knowledgeItemId: 301, title: '引导知识', status: 'DRAFT' }],
+      page: 1,
+      pageSize: 100,
+    })
+    await actions.signIn('content-admin', 'password123')
+    expect(state.auth.role).toBe('ADMIN')
+    expect(location.hash).toBe('#admin/storybooks')
+    expect(state.admin.storyVersions.map((item) => item.title)).toEqual(['待审绘本'])
+    expect(state.admin.knowledgeItems.map((item) => item.title)).toEqual(['引导知识'])
   })
 })
 
