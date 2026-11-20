@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>知芽前端效果评审</title>
+  <style>
+    :root {
+      --ink: #24372d;
+      --ink-soft: #4e5c53;
+      --muted: #6b716c;
+      --leaf: #466b51;
+      --leaf-deep: #365846;
+      --leaf-pale: #e8efe5;
+      --cream: #fff9ee;
+      --paper: #fffdf8;
+      --sand: #fae9d0;
+      --line: #e4d8c7;
+      --brown: #714a2c;
+      --brown-soft: #a57345;
+      --gold: #f1cb82;
+      --danger: #a14f3f;
+      --shadow: 0 18px 48px rgba(73, 47, 25, .13);
+      --radius: 22px;
+      --font-story: "Noto Serif SC", "Songti SC", STSong, SimSun, serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: #e9eee7; }
+    body {
+      margin: 0;
+      min-width: 1180px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 10%, rgba(241, 203, 130, .26), transparent 30rem),
+        linear-gradient(145deg, #eef3ea, #f5eee3);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .review-head {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      padding: 16px 24px;
+      border-bottom: 1px solid rgba(113, 74, 44, .12);
+      background: rgba(247, 243, 235, .94);
+      backdrop-filter: blur(18px);
+    }
+    .review-head-inner {
+      max-width: 1500px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .review-title { display: flex; align-items: center; gap: 12px; }
+    .review-mark {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px 14px 14px 4px;
+      color: #fff;
+      background: var(--leaf);
+      font-family: var(--font-story);
+      font-size: 22px;
+    }
+    .review-title h1 { margin: 0; font-family: var(--font-story); font-size: 23px; font-weight: 500; }
+    .review-title p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+
+    .review-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .review-segment { display: flex; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); }
+    .review-segment button {
+      min-height: 34px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+    }
+    .review-segment button.active { color: #fff; background: var(--leaf); }
+    .review-button {
+      min-height: 42px;
+      padding: 0 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--brown);
+      background: var(--paper);
+      font-size: 11px;
+    }
+
+    .review-layout {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 22px 24px 48px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 20px;
+      align-items: start;
+    }
+    .review-stage { min-width: 0; }
+    .viewport {
+      width: min(100%, 1280px);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid rgba(113, 74, 44, .18);
+      border-radius: 26px;
+      background: #f8f5ee;
+      box-shadow: 0 28px 80px rgba(37, 52, 43, .16);
+    }
+    .preview-page { min-height: 760px; }
+    .preview-page[hidden] { display: none; }
+
+    .app-header {
+      height: 66px;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      border-bottom: 1px solid rgba(228, 216, 199, .78);
+      background: rgba(255, 253, 248, .94);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+    .brand-dot {
+      width: 27px;
+      height: 27px;
+      border-radius: 50% 50% 50% 14%;
+      background: var(--leaf);
+      transform: rotate(-12deg);
+    }
+    .brand strong { display: block; font-family: var(--font-story); font-size: 17px; font-weight: 600; }
+    .brand small { display: block; color: var(--muted); font-size: 8px; letter-spacing: .08em; }
+    .top-nav { margin: 0 auto; display: flex; gap: 28px; }
+    .top-nav span { color: var(--ink-soft); font-size: 11px; }
+    .top-nav span.active { color: var(--leaf); font-weight: 700; }
+    .avatar {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--leaf);
+      font-family: var(--font-story);
+    }
+
+    .library-shell { padding: 32px; }
+    .library-heading { margin-bottom: 18px; }
+    .eyebrow { margin: 0; color: var(--brown-soft); font-size: 9px; letter-spacing: .12em; }
+    .library-heading h2 { margin: 4px 0 0; font-family: var(--font-story); font-size: 32px; font-weight: 500; }
+    .library-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 22px; align-items: start; }
+    .filter-panel {
+      padding: 20px;
+      border: 1px solid rgba(243, 225, 201, .9);
+      border-radius: var(--radius);
+      background: var(--cream);
+      box-shadow: 0 8px 22px rgba(73, 47, 25, .08);
+    }
+    .filter-panel h3 { margin: 0; font-family: var(--font-story); font-size: 27px; font-weight: 500; }
+    .filter-panel > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .recommend-copy {
+      margin: 10px 0;
+      padding: 9px 11px;
+      display: grid;
+      gap: 2px;
+      border-radius: 12px;
+      background: rgba(241, 203, 130, .24);
+    }
+    .recommend-copy span { color: var(--brown-soft); font-size: 9px; letter-spacing: .07em; }
+    .recommend-copy strong { color: var(--brown); font-family: var(--font-story); font-size: 13px; font-weight: 500; }
+    .chips { margin-top: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .chip {
+      min-height: 28px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--brown);
+      background: #e5caab;
+      font-family: var(--font-story);
+      font-size: 11px;
+    }
+    .chip.active { background: var(--gold); }
+    .filter-options { margin-top: 12px; padding-top: 11px; border-top: 1px solid #ead8bd; }
+    .filter-options strong { display: block; margin-bottom: 8px; color: var(--brown); font-size: 9px; }
+    .option-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .option {
+      min-height: 27px;
+      padding: 0 10px;
+      border: 1px solid #dfc9ad;
+      border-radius: 999px;
+      color: var(--brown);
+      background: #fffaf1;
+      font-size: 10px;
+    }
+    .option.selected { color: #fff; border-color: var(--leaf); background: var(--leaf); }
+
+    .featured {
+      min-height: 286px;
+      padding: 22px;
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 28px;
+      border-radius: calc(var(--radius) + 2px);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .cover {
+      position: relative;
+      overflow: hidden;
+      border-radius: 9px 15px 15px 9px;
+      box-shadow: 0 16px 26px rgba(73, 47, 25, .2);
+    }
+    .cover::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 68% 30%, rgba(255,255,255,.7) 0 5%, transparent 6%),
+        radial-gradient(circle at 50% 68%, rgba(255,255,255,.7) 0 12%, transparent 13%),
+        linear-gradient(145deg, #6f9c82, #d9bb7c 68%, #7e5840);
+    }
+    .cover::after {
+      content: "纸船去哪里";
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 22px;
+      padding: 10px;
+      color: #fff;
+      background: rgba(54, 88, 70, .72);
+      font-family: var(--font-story);
+      font-size: 19px;
+      text-align: center;
+    }
+    .featured-copy { display: flex; flex-direction: column; justify-content: center; }
+    .pill {
+      align-self: flex-start;
+      padding: 5px 10px;
+      border-radius: 999px;
+      color: var(--leaf);
+      background: var(--leaf-pale);
+      font-size: 9px;
+    }
+    .featured-copy h3 { margin: 12px 0 5px; font-family: var(--font-story); font-size: 32px; font-weight: 500; }
+    .meta { margin: 0; color: var(--muted); font-size: 10px; }
+    .reason {
+      margin: 16px 0;
+      padding: 13px 15px;
+      border-radius: 13px;
+      color: var(--ink-soft);
+      background: #f7f0e4;
+      font-size: 12px;
+      line-height: 20px;
+    }
+    .reason strong { color: var(--brown); }
+    .actions { display: flex; gap: 9px; }
+    .primary, .secondary {
+      min-height: 38px;
+      padding: 0 16px;
+      border-radius: 10px;
+      font-size: 10px;
+    }
+    .primary { border: 1px solid var(--leaf); color: #fff; background: var(--leaf); }
+    .secondary { border: 1px solid var(--line); color: var(--brown); background: var(--paper); }
+    .shelf { margin-top: 20px; }
+    .shelf-head { display: flex; align-items: center; justify-content: space-between; }
+    .shelf-head h3 { margin: 0; font-family: var(--font-story); font-size: 21px; font-weight: 500; }
+    .shelf-head span { color: var(--brown-soft); font-size: 10px; }
+    .shelf-row { margin-top: 12px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    .mini-book {
+      height: 116px;
+      border-radius: 6px 10px 10px 6px;
+      box-shadow: 0 8px 16px rgba(73, 47, 25, .14);
+    }
+    .mini-book:nth-child(1) { background: linear-gradient(145deg, #6f9c82, #d9bb7c); }
+    .mini-book:nth-child(2) { background: linear-gradient(145deg, #c0795d, #f1c787); }
+    .mini-book:nth-child(3) { background: linear-gradient(145deg, #7a8eab, #e3cfaa); }
+    .mini-book:nth-child(4) { background: linear-gradient(145deg, #9c7c64, #d6d49d); }
+    .mini-book:nth-child(5) { background: linear-gradient(145deg, #6d8a71, #e8d4b5); }
+    .mini-book:nth-child(6) { background: linear-gradient(145deg, #b26d62, #ecd7a3); }
+
+    .reader-shell { padding: 30px; background: linear-gradient(160deg, #f5efe5, #edf2ea); }
+    .reader-title h2 { margin: 7px 0; font-family: var(--font-story); font-size: 32px; font-weight: 500; }
+    .reader-title p { margin: 0; color: var(--muted); font-size: 10px; }
+    .reader-grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; }
+    .book-stage {
+      min-height: 440px;
+      padding: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius);
+      background: #e8e0d3;
+      box-shadow: var(--shadow);
+    }
+    .book-spread {
+      width: min(100%, 700px);
+      min-height: 360px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 20px 45px rgba(73, 47, 25, .2);
+    }
+    .book-art {
+      background:
+        radial-gradient(circle at 55% 45%, #f1cb82 0 8%, transparent 9%),
+        linear-gradient(155deg, #83a790, #d9bb7c 62%, #8b6649);
+    }
+    .book-text { padding: 40px 34px; display: flex; flex-direction: column; }
+    .book-text h3 { margin: 0; font-family: var(--font-story); font-size: 24px; font-weight: 500; }
+    .book-text p { margin-top: 18px; color: var(--ink-soft); font-family: var(--font-story); font-size: 16px; line-height: 29px; }
+    .book-text small { margin-top: auto; color: var(--muted); }
+    .reader-side { display: grid; align-content: start; gap: 12px; }
+    .question-card, .tip-card { padding: 18px; border-radius: 17px; background: var(--paper); box-shadow: 0 8px 22px rgba(73, 47, 25, .08); }
+    .question-card { border: 1px solid #e6cfae; background: var(--cream); }
+    .question-card h3, .tip-card h3 { margin: 0 0 10px; color: var(--brown); font-size: 12px; }
+    .question-card p, .tip-card p { margin: 0; font-family: var(--font-story); font-size: 16px; line-height: 26px; }
+    .tip-card p { color: var(--ink-soft); font-size: 12px; line-height: 21px; }
+    .question-actions { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .question-actions button { min-height: 35px; }
+    .question-actions .wide { grid-column: 1 / -1; }
+    .reader-dock {
+      margin-top: 16px;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .dock-button { min-height: 46px; border: 0; border-radius: 12px; color: var(--ink); background: transparent; font-size: 10px; }
+    .dock-button.primary { color: #fff; background: var(--leaf); }
+
+    .admin-shell { padding: 30px; background: linear-gradient(160deg, #f7f2e9, #edf3ea); }
+    .admin-title {
+      padding: 28px;
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      border-radius: 26px;
+      background: linear-gradient(145deg, #fffaf1, #eef4eb);
+      box-shadow: var(--shadow);
+    }
+    .admin-title h2 { margin: 7px 0; font-family: var(--font-story); font-size: 40px; font-weight: 500; }
+    .admin-title p { max-width: 680px; margin: 0; color: var(--muted); line-height: 22px; }
+    .admin-tabs { margin: 20px 0; display: flex; gap: 9px; }
+    .admin-tabs button { min-height: 40px; padding: 0 18px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); font-size: 10px; }
+    .admin-tabs button.active { color: #fff; border-color: var(--leaf); background: var(--leaf); }
+    .admin-list { display: grid; gap: 13px; }
+    .admin-card { padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 8px 22px rgba(73, 47, 25, .08); }
+    .admin-card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .admin-card-head h3 { margin: 7px 0 0; font-family: var(--font-story); font-size: 23px; font-weight: 500; }
+    .admin-card small { color: var(--muted); }
+    .admin-card p { margin: 9px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 19px; }
+    .admin-card-actions { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .admin-warning { color: var(--danger) !important; }
+
+    .review-page-picker { display: grid; gap: 5px; color: var(--brown-soft); font-size: 9px; letter-spacing: .05em; }
+    .review-page-picker select {
+      min-width: 210px;
+      min-height: 42px;
+      padding: 0 36px 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--brown);
+      background: var(--paper);
+      font-size: 11px;
+    }
+
+    .home-shell { padding: 28px 34px 40px; }
+    .home-hero { padding: 26px; display: grid; grid-template-columns: 1.15fr .9fr; gap: 28px; border-radius: 28px; background: linear-gradient(145deg, #fffaf2, #edf3eb); box-shadow: var(--shadow); }
+    .home-copy h2 { margin: 8px 0 12px; font-family: var(--font-story); font-size: 48px; font-weight: 500; line-height: 1.18; }
+    .home-copy > p { max-width: 560px; margin: 0; color: var(--muted); font-size: 13px; line-height: 23px; }
+    .home-copy .actions { margin-top: 20px; }
+    .home-book { min-height: 330px; display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; padding: 20px; border-radius: 22px; background: var(--paper); align-self: center; }
+    .home-book .cover { min-height: 286px; }
+    .home-book-copy { display: flex; flex-direction: column; justify-content: center; }
+    .home-book-copy h3 { margin: 13px 0 5px; font-family: var(--font-story); font-size: 28px; font-weight: 500; }
+    .home-book-copy p { margin: 12px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 19px; }
+    .home-bottom { margin-top: 22px; display: grid; grid-template-columns: minmax(0, 1.4fr) 300px; gap: 20px; }
+    .home-shelf, .reading-plan { padding: 22px; border-radius: 22px; background: var(--paper); box-shadow: 0 8px 22px rgba(73, 47, 25, .08); }
+    .home-shelf-head { display: flex; justify-content: space-between; align-items: center; }
+    .home-shelf-head h3 { margin: 0; font-family: var(--font-story); font-size: 23px; font-weight: 500; }
+    .home-shelf .shelf-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .reading-plan { background: var(--cream); }
+    .reading-plan strong { display: block; font-family: var(--font-story); font-size: 44px; font-weight: 500; }
+    .reading-plan h3 { margin: 7px 0 12px; font-family: var(--font-story); font-size: 22px; font-weight: 500; }
+    .reading-plan p { color: var(--muted); font-size: 11px; line-height: 19px; }
+
+    .detail-shell { padding: 30px; }
+    .detail-toolbar { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .detail-card { padding: 24px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 30px; border-radius: 26px; background: var(--paper); box-shadow: var(--shadow); }
+    .detail-card .cover { min-height: 320px; }
+    .detail-copy h2 { margin: 13px 0 7px; font-family: var(--font-story); font-size: 40px; font-weight: 500; }
+    .detail-copy > p { color: var(--muted); font-size: 11px; }
+    .detail-quote { margin: 20px 0; padding: 18px; border-left: 3px solid var(--gold); color: var(--ink-soft); background: var(--cream); font-family: var(--font-story); line-height: 27px; }
+    .detail-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+    .detail-note { margin-top: 20px; padding: 16px; border-radius: 14px; background: var(--leaf-pale); color: var(--ink-soft); font-size: 11px; line-height: 20px; }
+
+    .auth-shell { min-height: 760px; padding: 42px; display: grid; place-items: center; background: radial-gradient(circle at 20% 20%, rgba(241,203,130,.35), transparent 24rem), linear-gradient(145deg, #f8f0e4, #eef3e9); }
+    .auth-scene { width: min(100%, 920px); padding: 34px; display: grid; grid-template-columns: 1fr 360px; gap: 36px; border-radius: 28px; background: rgba(255, 253, 248, .94); box-shadow: var(--shadow); }
+    .auth-art h2 { margin: 12px 0; font-family: var(--font-story); font-size: 45px; font-weight: 500; line-height: 1.2; }
+    .auth-art p { color: var(--muted); font-size: 12px; line-height: 21px; }
+    .auth-form { padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: var(--cream); }
+    .auth-form h3 { margin: 15px 0 6px; font-family: var(--font-story); font-size: 28px; font-weight: 500; }
+    .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .auth-tabs button { min-height: 34px; border: 0; border-radius: 9px; background: #efe4d4; font-size: 10px; }
+    .auth-tabs button.active { color: #fff; background: var(--leaf); }
+    .field { margin-top: 13px; display: grid; gap: 5px; color: var(--brown); font-size: 9px; }
+    .field input, .field select, .field textarea { min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); }
+    .field textarea { min-height: 82px; resize: vertical; }
+    .auth-form .primary { width: 100%; margin-top: 16px; }
+
+    .account-shell { padding: 28px; display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 20px; background: linear-gradient(160deg, #f7f2e9, #edf3ea); }
+    .account-side { padding: 18px; border-radius: 20px; background: var(--paper); box-shadow: 0 8px 22px rgba(73,47,25,.08); align-self: start; }
+    .account-person { display: flex; align-items: center; gap: 10px; }
+    .account-avatar { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--leaf); font-family: var(--font-story); font-size: 20px; }
+    .account-person strong, .account-person small { display: block; }
+    .account-person small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .account-child { margin-top: 15px; padding: 9px 11px; display: flex; justify-content: space-between; border-radius: 999px; background: var(--leaf-pale); font-size: 10px; }
+    .account-nav { margin-top: 14px; display: grid; gap: 5px; }
+    .account-nav span { padding: 9px 11px; border-radius: 9px; color: var(--ink-soft); font-size: 10px; }
+    .account-nav span.active { color: var(--leaf); background: var(--leaf-pale); font-weight: 700; }
+    .account-main { min-width: 0; }
+    .account-title h2 { margin: 7px 0; font-family: var(--font-story); font-size: 35px; font-weight: 500; }
+    .account-title p { margin: 0; color: var(--muted); font-size: 10px; }
+    .stat-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stat-card { padding: 16px; border-radius: 16px; background: var(--paper); box-shadow: 0 8px 22px rgba(73,47,25,.08); }
+    .stat-card span { display: block; color: var(--muted); font-size: 9px; }
+    .stat-card strong { display: block; margin-top: 7px; font-family: var(--font-story); font-size: 27px; font-weight: 500; }
+    .account-card { margin-top: 16px; padding: 18px; border-radius: 18px; background: var(--paper); box-shadow: 0 8px 22px rgba(73,47,25,.08); }
+    .account-card-head { display: flex; align-items: center; justify-content: space-between; }
+    .account-card h3 { margin: 0; font-family: var(--font-story); font-size: 21px; font-weight: 500; }
+    .profile-list { margin-top: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .profile-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--cream); }
+    .profile-card h4 { margin: 8px 0 4px; font-family: var(--font-story); font-size: 20px; font-weight: 500; }
+    .profile-card p { margin: 0; color: var(--muted); font-size: 9px; line-height: 17px; }
+    .profile-card .admin-card-actions { margin-top: 12px; }
+    .history-list { margin-top: 12px; display: grid; gap: 9px; }
+    .history-row { padding: 13px 15px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 13px; background: var(--cream); }
+    .history-row strong { display: block; font-family: var(--font-story); font-size: 15px; }
+    .history-row small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .book-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+    .book-card { padding: 10px; border-radius: 14px; background: var(--paper); border: 1px solid var(--line); }
+    .book-card .mini-book { height: 150px; }
+    .book-card strong { display: block; margin-top: 9px; font-family: var(--font-story); font-size: 14px; }
+    .plan-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 14px; }
+    .plan-main { padding: 22px; border-radius: 18px; background: var(--cream); }
+    .plan-main h3 { margin: 8px 0; font-family: var(--font-story); font-size: 28px; font-weight: 500; }
+    .plan-main p, .plan-side p { color: var(--muted); font-size: 10px; line-height: 18px; }
+    .plan-side { padding: 18px; border-radius: 18px; background: var(--leaf-pale); }
+
+    .child-shell { min-height: 760px; padding: 34px; display: grid; place-items: center; background: radial-gradient(circle at 50% 0, rgba(241,203,130,.28), transparent 28rem), linear-gradient(160deg, #f7f1e6, #edf3e9); }
+    .child-card { width: min(100%, 920px); min-height: 620px; padding: 28px; border-radius: 30px; background: var(--paper); box-shadow: var(--shadow); }
+    .child-top { display: flex; justify-content: space-between; align-items: center; }
+    .child-top h2 { margin: 7px 0; font-family: var(--font-story); font-size: 36px; font-weight: 500; }
+    .child-content { margin-top: 20px; display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+    .child-page { min-height: 390px; padding: 30px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(155deg, #83a790, #d9bb7c 62%, #8b6649); color: #fff; font-family: var(--font-story); font-size: 28px; text-align: center; }
+    .child-question { padding: 20px; border-radius: 20px; background: var(--cream); }
+    .child-question h3 { margin: 0 0 10px; color: var(--brown); font-size: 13px; }
+    .child-question p { font-family: var(--font-story); font-size: 20px; line-height: 30px; }
+    .child-options { display: grid; gap: 10px; }
+    .child-options button { min-height: 54px; border: 1px solid #dcc5a5; border-radius: 14px; color: var(--brown); background: var(--paper); font-size: 16px; }
+    .child-dock { margin-top: 18px; display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+    .child-dock button { min-height: 58px; border: 0; border-radius: 15px; color: var(--ink); background: var(--leaf-pale); font-size: 13px; }
+    .child-dock button.primary { color: #fff; background: var(--leaf); }
+
+    .inspector {
+      position: sticky;
+      top: 100px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 253, 248, .94);
+      box-shadow: 0 8px 22px rgba(73, 47, 25, .08);
+    }
+    .inspector h2 { margin: 0 0 5px; font-family: var(--font-story); font-size: 20px; font-weight: 500; }
+    .inspector > p { margin: 0 0 14px; color: var(--muted); font-size: 10px; line-height: 17px; }
+    .control { margin-top: 10px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 10px; }
+    .control input[type="color"] { width: 34px; height: 28px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+    .control input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--leaf); }
+    .inspector-note { margin-top: 14px; padding: 10px; border-radius: 10px; color: var(--muted); background: var(--leaf-pale); font-size: 9px; line-height: 16px; }
+    .css-output {
+      width: 100%;
+      min-height: 118px;
+      margin-top: 10px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink-soft);
+      background: #fffaf1;
+      font: 9px/1.55 Consolas, monospace;
+      resize: vertical;
+    }
+
+  </style>
+</head>
+<body>
+  <header class="review-head">
+    <div class="review-head-inner">
+      <div class="review-title">
+        <span class="review-mark">芽</span>
+        <div>
+          <h1>知芽前端效果评审</h1>
+          <p>电脑端桌面评审页 · 不使用后端数据 · 可直接修改右侧变量</p>
+        </div>
+      </div>
+      <div class="review-actions">
+        <label class="review-page-picker">
+          评审页面
+          <select id="page-picker">
+            <option value="home">首页</option>
+            <option value="library" selected>绘本馆</option>
+            <option value="detail">绘本详情</option>
+            <option value="reader">阅读互动</option>
+            <option value="auth">登录与注册</option>
+            <option value="account-overview">个人中心首页</option>
+            <option value="account-children">儿童档案</option>
+            <option value="account-shelf">我的书架</option>
+            <option value="account-growth">成长记录</option>
+            <option value="account-plan">阅读计划</option>
+            <option value="child-mode">儿童模式</option>
+            <option value="admin-storybooks">绘本管理</option>
+            <option value="admin-knowledge">知识管理</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main class="review-layout">
+    <section class="review-stage">
+      <div class="viewport" id="viewport">
+        <section class="preview-page" data-page-panel="home" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div>
+            <nav class="top-nav"><span class="active">首页</span><span>绘本馆</span><span>成长记录</span><span>亲子时光</span></nav>
+            <button class="avatar" type="button">知</button>
+          </div>
+          <div class="home-shell">
+            <section class="home-hero">
+              <div class="home-copy">
+                <p class="eyebrow">亲子共读 · 从今天开始</p>
+                <h2>和孩子一起<br>打开更大的世界</h2>
+                <p>在绘本中，遇见更有趣的故事。选一本，和孩子慢慢读、慢慢聊。</p>
+                <div class="actions">
+                  <button class="primary" type="button">去绘本馆 →</button>
+                  <button class="secondary" type="button">查看阅读计划</button>
+                </div>
+              </div>
+              <article class="home-book">
+                <div class="cover"></div>
+                <div class="home-book-copy">
+                  <span class="pill">本周精选 · 亲子共读</span>
+                  <h3>纸船去哪里</h3>
+                  <p class="meta">团队原创 · 4–5 岁 · 6 页</p>
+                  <p>小纸船沿着水流出发，小芽在每个转弯处都遇见了新的朋友。</p>
+                  <div class="actions">
+                    <button class="primary" type="button">开始阅读</button>
+                    <button class="secondary" type="button">查看详情</button>
+                  </div>
+                </div>
+              </article>
+            </section>
+            <div class="home-bottom">
+              <section class="home-shelf">
+                <div class="home-shelf-head"><h3>精选绘本</h3><span>查看更多 →</span></div>
+                <div class="shelf-row">
+                  <div class="mini-book"></div><div class="mini-book"></div><div class="mini-book"></div>
+                  <div class="mini-book"></div><div class="mini-book"></div>
+                </div>
+              </section>
+              <aside class="reading-plan">
+                <p class="eyebrow">✦ 今日阅读计划</p>
+                <strong>10</strong>
+                <h3>和孩子一起，共读一本绘本吧！</h3>
+                <p>“只有用心，才能看见故事里真正的光。”</p>
+                <button class="primary" type="button">开始阅读</button>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="library">
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div>
+            <nav class="top-nav"><span>首页</span><span class="active">绘本馆</span><span>成长记录</span><span>亲子时光</span></nav>
+            <button class="avatar" type="button">知</button>
+          </div>
+          <div class="library-shell">
+            <div class="library-heading">
+              <p class="eyebrow">✦ 亲子共读 · 从今天开始</p>
+              <h2>绘本馆</h2>
+            </div>
+            <div class="library-grid">
+              <aside class="filter-panel">
+                <h3>绘本馆</h3>
+                <p>展示公开绘本和当前账号已审核的私有绘本</p>
+                <div class="recommend-copy">
+                  <span>✦ 为小芽推荐</span>
+                  <strong>根据年龄、兴趣和阅读时长挑选</strong>
+                </div>
+                <div class="chips">
+                  <button class="chip" type="button">全部</button>
+                  <button class="chip" type="button">年龄</button>
+                  <button class="chip active" type="button">主题</button>
+                  <button class="chip" type="button">阅读时长</button>
+                </div>
+                <div class="filter-options">
+                  <strong>主题：选择具体条件</strong>
+                  <div class="option-row">
+                    <button class="option" type="button">全部</button>
+                    <button class="option" type="button">亲子依恋</button>
+                    <button class="option" type="button">安全感</button>
+                    <button class="option selected" type="button">友谊</button>
+                    <button class="option" type="button">自然观察</button>
+                    <button class="option" type="button">勇气</button>
+                  </div>
+                </div>
+              </aside>
+              <div>
+                <article class="featured">
+                  <div class="cover"></div>
+                  <div class="featured-copy">
+                    <span class="pill">公开已发布 · 亲子共读</span>
+                    <h3>纸船去哪里</h3>
+                    <p class="meta">团队原创 · 4–5 岁 · 6 页</p>
+                    <div class="reason"><strong>推荐理由：</strong>符合 4～5 岁与兴趣「友谊」，篇幅适合 10 分钟共读。</div>
+                    <div class="actions">
+                      <button class="primary" type="button">查看详情</button>
+                      <button class="secondary" type="button">开始阅读</button>
+                    </div>
+                  </div>
+                </article>
+                <div class="shelf">
+                  <div class="shelf-head"><h3>友谊主题绘本</h3><span>共 6 本 · 点击封面切换</span></div>
+                  <div class="shelf-row">
+                    <div class="mini-book"></div><div class="mini-book"></div><div class="mini-book"></div>
+                    <div class="mini-book"></div><div class="mini-book"></div><div class="mini-book"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="detail" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div>
+            <nav class="top-nav"><span>首页</span><span class="active">绘本馆</span><span>成长记录</span><span>亲子时光</span></nav>
+            <button class="avatar" type="button">知</button>
+          </div>
+          <div class="detail-shell">
+            <div class="detail-toolbar"><button class="secondary" type="button">← 返回绘本馆</button><span class="eyebrow">绘本详情</span></div>
+            <article class="detail-card">
+              <div class="cover"></div>
+              <div class="detail-copy">
+                <span class="pill">公开已发布 · 亲子共读</span>
+                <h2>纸船去哪里</h2>
+                <p>团队原创 · 4–5 岁 · 6 页 · 自然观察 / 友谊</p>
+                <blockquote class="detail-quote">“纸船会漂到哪里？也许答案不在远方，而在愿意陪它一起看水的人身边。”</blockquote>
+                <div class="detail-stats">
+                  <span class="pill">4–5 岁</span><span class="pill">约 10 分钟</span><span class="pill">自然观察</span><span class="pill">友谊</span>
+                </div>
+                <div class="detail-note">翻开每一页，观察纸船的位置与角色的动作。阅读中会根据孩子的理解程度调整提问。</div>
+                <div class="actions" style="margin-top:18px">
+                  <button class="primary" type="button">开始阅读</button>
+                  <button class="secondary" type="button">选择其他绘本</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="reader" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div>
+            <nav class="top-nav"><span>首页</span><span class="active">绘本馆</span><span>成长记录</span><span>亲子时光</span></nav>
+            <button class="avatar" type="button">知</button>
+          </div>
+          <div class="reader-shell">
+            <div class="reader-title">
+              <p class="eyebrow">亲子共读 · 第 2 页 / 共 6 页</p>
+              <h2>纸船去哪里</h2>
+              <p>后端会话已同步 · 拖动书页边缘翻页</p>
+            </div>
+            <div class="reader-grid">
+              <div>
+                <div class="book-stage">
+                  <div class="book-spread">
+                    <div class="book-art"></div>
+                    <div class="book-text">
+                      <h3>纸船漂进了浅湾</h3>
+                      <p>小芽蹲在河边，看着纸船慢慢转了一圈。她轻轻伸出手，又把纸船推回了水流里。</p>
+                      <small>第 2 页 · 回看已读页</small>
+                    </div>
+                  </div>
+                </div>
+                <nav class="reader-dock">
+                  <button class="dock-button" type="button">‹ 上一页</button>
+                  <button class="dock-button" type="button">▶ 朗读</button>
+                  <button class="dock-button primary" type="button">芽 语音回答</button>
+                  <button class="dock-button" type="button">下一页 ›</button>
+                </nav>
+              </div>
+              <aside class="reader-side">
+                <section class="question-card">
+                  <h3>✦ 共读小提问</h3>
+                  <p>为什么小芽又把纸船推回水里？</p>
+                  <div class="question-actions">
+                    <button class="secondary" type="button">已理解</button>
+                    <button class="secondary" type="button">还没懂</button>
+                    <button class="secondary" type="button">跳过本页</button>
+                    <button class="primary wide" type="button">输入回答</button>
+                  </div>
+                </section>
+                <section class="tip-card">
+                  <h3>给家长的共读提示</h3>
+                  <p>先让孩子观察纸船的位置，再请他猜一猜小芽为什么这样做。答案没有唯一标准。</p>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="auth" hidden>
+          <div class="auth-shell">
+            <div class="auth-scene">
+              <div class="auth-art">
+                <p class="eyebrow">亲子共读 · 家长空间</p>
+                <h2>把每个普通夜晚，读成一段故事</h2>
+                <p>登录后读取已发布绘本、儿童档案和真实阅读进度。内容管理员登录后进入内容工作台。</p>
+                <button class="secondary" type="button">先看看本地设计预览 →</button>
+              </div>
+              <form class="auth-form">
+                <div class="auth-tabs"><button class="active" type="button">登录</button><button type="button">注册</button></div>
+                <h3>回到知芽</h3>
+                <p class="meta">家长登录后创建儿童资料；内容管理员登录后直接进入内容工作台。</p>
+                <label class="field">账号<input value="zhiya_demo"></label>
+                <label class="field">密码<input value="••••••••••••" type="password"></label>
+                <button class="primary" type="button">登录家长空间</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="account-overview" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div>
+            <nav class="top-nav"><span>首页</span><span>绘本馆</span><span class="active">成长记录</span><span class="active">个人中心</span></nav>
+            <button class="avatar" type="button">知</button>
+          </div>
+          <div class="account-shell">
+            <aside class="account-side">
+              <div class="account-person"><span class="account-avatar">知</span><span><strong>知芽家长</strong><small>zhiya_demo</small></span></div>
+              <div class="account-child"><span>小芽 · 4–5 岁</span><span>⌄</span></div>
+              <nav class="account-nav"><span class="active">⌂ 个人中心首页</span><span>☺ 个人资料</span><span>♧ 儿童档案</span><span>▤ 我的书架</span><span>⌁ 成长记录</span><span>▦ 阅读计划</span></nav>
+            </aside>
+            <div class="account-main">
+              <div class="account-title"><h2>晚上好，知芽家长</h2><p>真实账号、档案与阅读会话由后端提供。</p></div>
+              <div class="stat-grid"><div class="stat-card"><span>已完成/进行中会话</span><strong>12</strong></div><div class="stat-card"><span>读过绘本版本</span><strong>8</strong></div><div class="stat-card"><span>累计浏览页面</span><strong>46</strong></div></div>
+              <div class="account-card">
+                <div class="account-card-head"><h3>最近阅读</h3><button class="secondary" type="button">查看全部</button></div>
+                <div class="history-list">
+                  <div class="history-row"><span><strong>纸船去哪里</strong><small>今天 20:16 · 已读 5 页 · 已完成</small></span><button class="secondary" type="button">打开记录</button></div>
+                  <div class="history-row"><span><strong>小狐狸的雨伞</strong><small>昨天 19:42 · 已读 3 页 · 已中断</small></span><button class="secondary" type="button">打开记录</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="account-children" hidden>
+          <div class="app-header"><div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div><nav class="top-nav"><span>首页</span><span>绘本馆</span><span class="active">个人中心</span></nav><button class="avatar" type="button">知</button></div>
+          <div class="account-shell">
+            <aside class="account-side">
+              <div class="account-person"><span class="account-avatar">知</span><span><strong>知芽家长</strong><small>zhiya_demo</small></span></div>
+              <nav class="account-nav"><span>⌂ 个人中心首页</span><span>☺ 个人资料</span><span class="active">♧ 儿童档案</span><span>▤ 我的书架</span><span>⌁ 成长记录</span><span>▦ 阅读计划</span></nav>
+            </aside>
+            <div class="account-main">
+              <div class="account-title"><h2>儿童档案</h2><p>为不同孩子分别保存年龄、兴趣和阅读计划。</p></div>
+              <div class="profile-list">
+                <article class="profile-card"><span class="pill">当前使用</span><h4>小芽</h4><p>4–5 岁 · 兴趣：自然观察、友谊 · 每次 10 分钟</p><div class="admin-card-actions"><button class="secondary" type="button">编辑</button><button class="secondary" type="button">删除档案</button></div></article>
+                <article class="profile-card"><span class="pill">备用档案</span><h4>小禾</h4><p>3–4 岁 · 兴趣：动物、亲子依恋 · 每次 8 分钟</p><div class="admin-card-actions"><button class="secondary" type="button">编辑</button><button class="secondary" type="button">删除档案</button></div></article>
+              </div>
+              <button class="primary" type="button" style="margin-top:14px">＋ 添加孩子</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="account-shelf" hidden>
+          <div class="app-header"><div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div><nav class="top-nav"><span>首页</span><span>绘本馆</span><span class="active">个人中心</span></nav><button class="avatar" type="button">知</button></div>
+          <div class="account-shell">
+            <aside class="account-side"><div class="account-person"><span class="account-avatar">知</span><span><strong>知芽家长</strong><small>zhiya_demo</small></span></div><nav class="account-nav"><span>⌂ 个人中心首页</span><span>☺ 个人资料</span><span>♧ 儿童档案</span><span class="active">▤ 我的书架</span><span>⌁ 成长记录</span><span>▦ 阅读计划</span></nav></aside>
+            <div class="account-main">
+              <div class="account-title"><h2>我的绘本小书架</h2><p>收藏和计划暂存于本地，后端接口就绪后可持久化。</p></div>
+              <div class="account-card">
+                <div class="account-card-head"><h3>收藏绘本</h3><button class="secondary" type="button">管理收藏</button></div>
+                <div class="book-grid"><div class="book-card"><div class="mini-book"></div><strong>纸船去哪里</strong></div><div class="book-card"><div class="mini-book"></div><strong>小狐狸的雨伞</strong></div><div class="book-card"><div class="mini-book"></div><strong>蜗牛的旅行</strong></div><div class="book-card"><div class="mini-book"></div><strong>图书馆的小老鼠</strong></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="account-growth" hidden>
+          <div class="app-header"><div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div><nav class="top-nav"><span>首页</span><span>绘本馆</span><span class="active">成长记录</span><span class="active">个人中心</span></nav><button class="avatar" type="button">知</button></div>
+          <div class="account-shell">
+            <aside class="account-side"><div class="account-person"><span class="account-avatar">知</span><span><strong>知芽家长</strong><small>zhiya_demo</small></span></div><nav class="account-nav"><span>⌂ 个人中心首页</span><span>☺ 个人资料</span><span>♧ 儿童档案</span><span>▤ 我的书架</span><span class="active">⌁ 成长记录</span><span>▦ 阅读计划</span></nav></aside>
+            <div class="account-main">
+              <div class="account-title"><h2>成长足迹</h2><p>只展示后端真实阅读会话，不推断情绪或能力。</p></div>
+              <div class="stat-grid"><div class="stat-card"><span>已完成/进行中会话</span><strong>12</strong></div><div class="stat-card"><span>读过绘本版本</span><strong>8</strong></div><div class="stat-card"><span>累计浏览页面</span><strong>46</strong></div></div>
+              <div class="account-card">
+                <div class="account-card-head"><h3>阅读记录</h3><button class="secondary" type="button">刷新记录</button></div>
+                <div class="history-list">
+                  <div class="history-row"><span><strong>纸船去哪里</strong><small>已读 5 页 · 已完成 · 今天 20:16</small></span><button class="secondary" type="button">删除记录</button></div>
+                  <div class="history-row"><span><strong>小狐狸的雨伞</strong><small>已读 3 页 · 已中断 · 昨天 19:42</small></span><button class="secondary" type="button">删除记录</button></div>
+                  <div class="history-row"><span><strong>蜗牛的旅行</strong><small>已读 6 页 · 已完成 · 11 月 18 日</small></span><button class="secondary" type="button">删除记录</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="account-plan" hidden>
+          <div class="app-header"><div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>AI 亲子共读</small></span></div><nav class="top-nav"><span>首页</span><span>绘本馆</span><span class="active">个人中心</span></nav><button class="avatar" type="button">知</button></div>
+          <div class="account-shell">
+            <aside class="account-side"><div class="account-person"><span class="account-avatar">知</span><span><strong>知芽家长</strong><small>zhiya_demo</small></span></div><nav class="account-nav"><span>⌂ 个人中心首页</span><span>☺ 个人资料</span><span>♧ 儿童档案</span><span>▤ 我的书架</span><span>⌁ 成长记录</span><span class="active">▦ 阅读计划</span></nav></aside>
+            <div class="account-main">
+              <div class="account-title"><h2>阅读计划</h2><p>根据孩子档案安排每日共读时长和提醒。</p></div>
+              <div class="plan-grid">
+                <section class="plan-main"><p class="eyebrow">为小芽安排</p><h3>今晚共读 10 分钟</h3><p>推荐主题：友谊、自然观察。建议选择 6 页以内绘本，留出 3–5 分钟交流。</p><button class="primary" type="button">保存阅读计划</button></section>
+                <aside class="plan-side"><h3>本周概览</h3><p>周一至周四已完成 4 次阅读。<br>累计阅读时间 42 分钟。</p><p>收藏和计划暂存于本地，等待后端持久化接口。</p></aside>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="child-mode" hidden>
+          <div class="child-shell">
+            <div class="child-card">
+              <div class="child-top"><div><p class="eyebrow">儿童自主阅读模式</p><h2>纸船去哪里</h2><p class="meta">第 2 页 / 共 6 页 · 剩余 8 分钟</p></div><span class="pill">小芽的设备</span></div>
+              <div class="child-content">
+                <div class="child-page">小芽蹲在河边，看着纸船慢慢转了一圈。</div>
+                <section class="child-question"><h3>✦ 这一页的问题</h3><p>纸船现在在水流里吗？</p><div class="child-options"><button type="button">是</button><button type="button">不是</button><button type="button">不知道</button></div></section>
+              </div>
+              <div class="child-dock"><button type="button">‹ 上一页</button><button type="button">▶ 听一听</button><button class="primary" type="button">芽 回答问题</button><button type="button">下一页 ›</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="admin-storybooks" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>内容管理</small></span></div>
+            <nav class="top-nav"><span>首页</span><span class="active">内容管理</span></nav>
+            <button class="avatar" type="button">管</button>
+          </div>
+          <div class="admin-shell">
+            <div class="admin-title">
+              <div>
+                <p class="eyebrow">内容管理员工作台</p>
+                <h2>绘本与知识管理</h2>
+                <p>创建草稿、审核发布并维护可检索的共读知识。评审页使用示例数据，方便检查卡片、状态和操作层级。</p>
+              </div>
+              <button class="secondary" type="button">返回首页</button>
+            </div>
+            <nav class="admin-tabs">
+              <button class="active" type="button">绘本管理</button>
+              <button type="button">知识管理</button>
+            </nav>
+            <div class="admin-list">
+              <article class="admin-card">
+                <div class="admin-card-head">
+                  <div><span class="pill">草稿</span><h3>纸船去哪里</h3></div>
+                  <small>版本 1 · ID 301</small>
+                </div>
+                <p>4–5 岁 · 6 页 · 自然观察 / 友谊</p>
+                <p>许可：团队原创，可用于知芽项目内部展示。</p>
+                <div class="admin-card-actions">
+                  <button class="primary" type="button">审核并发布</button>
+                  <button class="secondary" type="button">查看页面</button>
+                </div>
+              </article>
+              <article class="admin-card">
+                <div class="admin-card-head">
+                  <div><span class="pill">待补素材</span><h3>蜗牛的旅行</h3></div>
+                  <small>版本 1 · ID 302</small>
+                </div>
+                <p>3–4 岁 · 5 页 · 勇气 / 自然观察</p>
+                <p class="admin-warning">第 4 页缺少图片资源键，暂不可发布。</p>
+                <div class="admin-card-actions">
+                  <button class="primary" type="button" disabled>审核并发布</button>
+                  <button class="secondary" type="button">查看页面</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-page" data-page-panel="admin-knowledge" hidden>
+          <div class="app-header">
+            <div class="brand"><span class="brand-dot"></span><span><strong>知芽绘本</strong><small>内容管理</small></span></div>
+            <nav class="top-nav"><span>首页</span><span class="active">内容管理</span></nav>
+            <button class="avatar" type="button">管</button>
+          </div>
+          <div class="admin-shell">
+            <div class="admin-title">
+              <div>
+                <p class="eyebrow">内容管理员工作台</p>
+                <h2>绘本与知识管理</h2>
+                <p>知识版本按条目逐项维护；审核通过与停用会保留历史版本和阅读引用。</p>
+              </div>
+              <button class="secondary" type="button">返回首页</button>
+            </div>
+            <nav class="admin-tabs">
+              <button type="button">绘本管理</button>
+              <button class="active" type="button">知识管理</button>
+            </nav>
+            <div class="admin-list">
+              <article class="admin-card">
+                <div class="admin-card-head">
+                  <div><span class="pill">审核通过</span><h3>提问遵循由观察到推理的阶梯</h3></div>
+                  <small>KN-GUIDE-004 · v2</small>
+                </div>
+                <p>来源：知芽内容规范 · 段落 3 · 全龄 · GUIDANCE</p>
+                <p>先请孩子指出画面里的角色，再追问角色为什么这样做。</p>
+                <div class="admin-card-actions">
+                  <button class="secondary" type="button">创建修订</button>
+                  <button class="secondary" type="button">停用</button>
+                </div>
+              </article>
+              <article class="admin-card">
+                <div class="admin-card-head">
+                  <div><span class="pill">草稿</span><h3>不评价孩子的能力高低</h3></div>
+                  <small>KN-SAFE-003 · v1</small>
+                </div>
+                <p>来源：幼儿阅读安全指南 · 第 4 节 · 全龄 · SAFETY</p>
+                <p>避免使用“你怎么连这个都不知道”等否定式表达。</p>
+                <div class="admin-card-actions">
+                  <button class="primary" type="button">审核通过</button>
+                  <button class="secondary" type="button">创建修订</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-label="视觉参数调整">
+      <h2>快速调整</h2>
+      <p>修改后可直接复制 CSS 变量给前端开发。</p>
+      <label class="control">主色<input id="leaf" type="color" value="#466b51"></label>
+      <label class="control">背景<input id="cream" type="color" value="#fff9ee"></label>
+      <label class="control">纸张<input id="paper" type="color" value="#fffdf8"></label>
+      <label class="control">强调色<input id="gold" type="color" value="#f1cb82"></label>
+      <label class="control">圆角 <output id="radius-value">22px</output><input id="radius" type="range" min="8" max="34" value="22"></label>
+      <button class="review-button" id="copy-css" type="button">复制当前 CSS 变量</button>
+      <textarea class="css-output" id="css-output" readonly aria-label="当前 CSS 变量"></textarea>
+      <p class="inspector-note">这个 HTML 只用于视觉评审，不调用 API、不保存数据。可直接编辑下方源码或在右侧调参后复制结果。</p>
+    </aside>
+  </main>
+
+  <script>
+    const pagePicker = document.querySelector('#page-picker')
+    const pagePanels = [...document.querySelectorAll('[data-page-panel]')]
+    const controls = {
+      leaf: document.querySelector('#leaf'),
+      cream: document.querySelector('#cream'),
+      paper: document.querySelector('#paper'),
+      gold: document.querySelector('#gold'),
+      radius: document.querySelector('#radius'),
+    }
+    const radiusValue = document.querySelector('#radius-value')
+    const cssOutput = document.querySelector('#css-output')
+
+    function selectPage(name) {
+      pagePicker.value = name
+      pagePanels.forEach((panel) => { panel.hidden = panel.dataset.pagePanel !== name })
+    }
+
+    function cssVariables() {
+      return [
+        `--leaf: ${controls.leaf.value};`,
+        `--cream: ${controls.cream.value};`,
+        `--paper: ${controls.paper.value};`,
+        `--gold: ${controls.gold.value};`,
+        `--radius: ${controls.radius.value}px;`,
+      ].join('\n')
+    }
+
+    function syncVariables() {
+      document.documentElement.style.setProperty('--leaf', controls.leaf.value)
+      document.documentElement.style.setProperty('--cream', controls.cream.value)
+      document.documentElement.style.setProperty('--paper', controls.paper.value)
+      document.documentElement.style.setProperty('--gold', controls.gold.value)
+      document.documentElement.style.setProperty('--radius', `${controls.radius.value}px`)
+      radiusValue.value = `${controls.radius.value}px`
+      cssOutput.value = cssVariables()
+    }
+
+    pagePicker.addEventListener('change', () => selectPage(pagePicker.value))
+    Object.values(controls).forEach((control) => control.addEventListener('input', syncVariables))
+    document.querySelector('#copy-css').addEventListener('click', async () => {
+      const text = cssVariables()
+      try {
+        await navigator.clipboard.writeText(text)
+      } catch {
+        cssOutput.select()
+        document.execCommand('copy')
+      }
+      const button = document.querySelector('#copy-css')
+      button.textContent = '已复制'
+      setTimeout(() => { button.textContent = '复制当前 CSS 变量' }, 1200)
+    })
+
+    syncVariables()
+  </script>
+</body>
+</html>
